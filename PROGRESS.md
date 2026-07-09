@@ -114,3 +114,11 @@
 - Verification: PASSED
 - Deviations:
   - Manifest generation deferred to the next atomic step.
+
+## Step 16
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Implemented manifest generation helper
+- Verification: PASSED
+- Deviations:
+  - Manifest integration into run() deferred to the next atomic step.
