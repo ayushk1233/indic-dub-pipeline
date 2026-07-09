@@ -346,3 +346,11 @@
 - Verification: PASSED
 - Deviations:
   - Sequential translation for MVP. Batching will be added later if needed.
+
+## Step 44
+- Phase/Day: Phase 3 / Day 3
+- Completed:
+  - Added translation quality metrics
+- Verification: PASSED
+- Deviations:
+  - Uses structural metrics only; reference-based metrics (BLEU/COMET) are deferred.
