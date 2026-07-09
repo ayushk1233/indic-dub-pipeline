@@ -90,3 +90,11 @@
 - Verification: PASSED
 - Deviations:
   - Silence detection and manifest generation intentionally deferred to the next atomic step.
+
+## Step 13
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Implemented silence detection helper using FFmpeg silencedetect
+- Verification: PASSED
+- Deviations:
+  - Integration into preprocessing pipeline deferred to the next atomic step.

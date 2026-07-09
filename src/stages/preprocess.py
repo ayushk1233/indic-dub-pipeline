@@ -1,3 +1,5 @@
+import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -42,6 +44,53 @@ class FFmpegPreprocessStage(PipelineStage):
         duration = float(probe.get("format", {}).get("duration", 0))
 
         return duration > 0
+
+    def detect_silences(
+        self,
+        audio_path: str,
+        noise: str = "-30dB",
+        duration: float = 0.5,
+    ) -> list[tuple[float, float]]:
+        """
+        Returns a list of (silence_start, silence_end) tuples.
+        """
+
+        command = [
+            "ffmpeg",
+            "-i",
+            audio_path,
+            "-af",
+            f"silencedetect=noise={noise}:d={duration}",
+            "-f",
+            "null",
+            "-"
+        ]
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+        )
+
+        output = process.stderr
+
+        starts = [
+            float(x)
+            for x in re.findall(
+                r"silence_start:\s*([0-9.]+)",
+                output,
+            )
+        ]
+
+        ends = [
+            float(x)
+            for x in re.findall(
+                r"silence_end:\s*([0-9.]+)",
+                output,
+            )
+        ]
+
+        return list(zip(starts, ends))
 
     def run(
         self,
