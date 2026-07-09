@@ -62,8 +62,11 @@ class IndicTrans2Backend(TranslationBackend):
         except AttributeError:
             pass
 
+        # The tokenizer requires the text to be prefixed with the language tags.
+        formatted_text = f"{src_lang} {tgt_lang} {text}"
+
         inputs = self.tokenizer(
-            text,
+            formatted_text,
             return_tensors="pt",
             padding=True,
             truncation=True,
