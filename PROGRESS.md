@@ -337,3 +337,12 @@
 - Verification: PASSED
 - Deviations:
   - Backend encapsulates model-specific language tags.
+
+## Step 43
+- Phase/Day: Phase 3 / Day 3
+- Completed:
+  - Implemented TranslationProcessor
+  - Connected TranscriptResult to TranslationBackend
+- Verification: PASSED
+- Deviations:
+  - Sequential translation for MVP. Batching will be added later if needed.
