@@ -225,3 +225,11 @@
 - Verification: PASSED
 - Deviations:
   - Chunk size temporarily hardcoded (30 s / 1 s overlap). Will become configurable in a later configuration refinement.
+
+## Step 29
+- Phase/Day: Phase 1 / Integration Testing
+- Completed:
+  - Added preprocessing integration tests
+- Verification: PASSED
+- Deviations:
+  - MP4 integration test uses existing preprocessing pipeline; dedicated no-audio video fixture will be added later.
