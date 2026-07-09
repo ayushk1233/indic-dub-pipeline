@@ -139,3 +139,11 @@
 - Verification: PASSED
 - Deviations:
   - Threshold temporarily implemented in code (0.25 s). It will be moved into configuration in a later configuration-refinement step.
+
+## Step 19
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Added typed manifest models
+- Verification: PASSED
+- Deviations:
+  - Existing JSON manifest intentionally unchanged. Models introduced first to preserve backward compatibility.
