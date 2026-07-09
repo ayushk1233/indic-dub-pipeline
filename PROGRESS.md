@@ -131,3 +131,11 @@
 - Verification: PASSED
 - Deviations:
   - Fixed-window fallback intentionally deferred to the next atomic step.
+
+## Step 18
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Added minimum speech segment duration filtering
+- Verification: PASSED
+- Deviations:
+  - Threshold temporarily implemented in code (0.25 s). It will be moved into configuration in a later configuration-refinement step.

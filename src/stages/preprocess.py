@@ -18,6 +18,8 @@ class FFmpegPreprocessStage(PipelineStage):
     FFmpeg probing and extraction will be added in later atomic steps.
     """
 
+    MIN_SEGMENT_DURATION_S = 0.25
+
     def validate_input(self, input_path: str) -> bool:
         path = Path(input_path)
 
@@ -109,11 +111,15 @@ class FFmpegPreprocessStage(PipelineStage):
         current_start = 0.0
 
         for silence_start, silence_end in silences:
-            if silence_start > current_start:
+            duration = silence_start - current_start
+
+            if duration >= self.MIN_SEGMENT_DURATION_S:
                 segments.append((current_start, silence_start))
             current_start = silence_end
 
-        if current_start < total_duration:
+        duration = total_duration - current_start
+
+        if duration >= self.MIN_SEGMENT_DURATION_S:
             segments.append((current_start, total_duration))
 
         return segments
