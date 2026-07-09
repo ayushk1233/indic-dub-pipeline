@@ -249,3 +249,11 @@
 - Verification: PASSED
 - Deviations:
   - No implementation yet. Package scaffold only.
+
+## Step 32
+- Phase/Day: Phase 2 / Day 2
+- Completed:
+  - Added typed ASR transcript models
+- Verification: PASSED
+- Deviations:
+  - Models defined before Faster-Whisper integration to establish a stable contract.
