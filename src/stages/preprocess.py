@@ -9,6 +9,7 @@ import ffmpeg
 from src.orchestrator.models import StageResult, StageStatus
 from src.stages.base import PipelineStage
 from src.stages.preprocessing.audio import AudioProcessor
+from src.stages.preprocessing.manifest import ManifestWriter
 from src.stages.preprocessing.segmentation import Segmenter
 from src.stages.preprocessing.validator import validate_media
 
@@ -23,34 +24,6 @@ class FFmpegPreprocessStage(PipelineStage):
 
     def validate_input(self, input_path: str) -> bool:
         return validate_media(input_path)
-
-
-
-    def write_manifest(
-        self,
-        chunk_paths: list[Path],
-        segments: list[tuple[float, float]],
-        output_path: Path,
-    ) -> Path:
-        """
-        Write a JSON manifest describing generated speech chunks.
-        """
-
-        manifest = []
-
-        for chunk_path, (start, end) in zip(chunk_paths, segments):
-            manifest.append(
-                {
-                    "chunk_path": str(chunk_path),
-                    "start_ts": start,
-                    "end_ts": end,
-                }
-            )
-
-        with output_path.open("w", encoding="utf-8") as f:
-            json.dump(manifest, f, indent=2)
-
-        return output_path
 
     def run(
         self,
@@ -97,10 +70,12 @@ class FFmpegPreprocessStage(PipelineStage):
             output_dir / "chunks",
         )
 
-        manifest_path = self.write_manifest(
-            chunk_paths,
-            segments,
-            output_dir / "manifest.json",
+        writer = ManifestWriter()
+
+        manifest_path = writer.write(
+            chunk_paths=chunk_paths,
+            segments=segments,
+            output_path=output_dir / "manifest.json",
         )
 
         latency_ms = (time.perf_counter() - start) * 1000

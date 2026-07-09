@@ -200,3 +200,12 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 26
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Introduced ManifestWriter service
+  - FFmpegPreprocessStage delegates manifest generation
+- Verification: PASSED
+- Deviations:
+  - None
