@@ -182,3 +182,11 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 24
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Moved preprocessing models into preprocessing package
+- Verification: PASSED
+- Deviations:
+  - None
