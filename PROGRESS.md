@@ -106,3 +106,11 @@
 - Verification: PASSED
 - Deviations:
   - Audio chunk generation deferred to the next atomic step.
+
+## Step 15
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Implemented speech segment extraction
+- Verification: PASSED
+- Deviations:
+  - Manifest generation deferred to the next atomic step.

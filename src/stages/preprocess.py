@@ -117,6 +117,35 @@ class FFmpegPreprocessStage(PipelineStage):
 
         return segments
 
+    def extract_segments(
+        self,
+        audio_path: str,
+        segments: list[tuple[float, float]],
+        output_dir: Path,
+    ) -> list[Path]:
+        """
+        Extract each speech segment into an individual WAV file.
+        """
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        chunk_paths: list[Path] = []
+
+        for index, (start, end) in enumerate(segments):
+            chunk_path = output_dir / f"chunk_{index:04d}.wav"
+
+            (
+                ffmpeg
+                .input(audio_path, ss=start, to=end)
+                .output(str(chunk_path))
+                .overwrite_output()
+                .run(quiet=True)
+            )
+
+            chunk_paths.append(chunk_path)
+
+        return chunk_paths
+
     def run(
         self,
         input_path: str,
