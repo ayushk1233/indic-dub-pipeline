@@ -281,3 +281,11 @@
 - Verification: PASSED
 - Deviations:
   - Backend only loads the model and exposes transcribe(). Integration into the processor is deferred.
+
+## Step 36
+- Phase/Day: Phase 2 / Day 2
+- Completed:
+  - Implemented ASRProcessor using FasterWhisperBackend
+- Verification: PASSED
+- Deviations:
+  - Uses first transcription result for language detection.
