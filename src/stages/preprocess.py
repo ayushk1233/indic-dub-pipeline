@@ -206,15 +206,38 @@ class FFmpegPreprocessStage(PipelineStage):
             .run(quiet=True)
         )
 
+        probe = ffmpeg.probe(str(output_audio))
+        total_duration = float(probe["format"]["duration"])
+
+        silences = self.detect_silences(str(output_audio))
+
+        segments = self.build_segments(
+            silences,
+            total_duration,
+        )
+
+        chunk_paths = self.extract_segments(
+            str(output_audio),
+            segments,
+            output_dir / "chunks",
+        )
+
+        manifest_path = self.write_manifest(
+            chunk_paths,
+            segments,
+            output_dir / "manifest.json",
+        )
+
         latency_ms = (time.perf_counter() - start) * 1000
 
         return StageResult(
             stage_name="preprocess",
             status=StageStatus.DONE,
-            output_path=str(output_audio),
+            output_path=str(manifest_path),
             metrics={
                 "latency_ms": latency_ms,
                 "sample_rate": cfg["audio"]["sample_rate"],
                 "channels": cfg["audio"]["channels"],
+                "num_segments": len(chunk_paths),
             },
         )

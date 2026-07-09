@@ -122,3 +122,12 @@
 - Verification: PASSED
 - Deviations:
   - Manifest integration into run() deferred to the next atomic step.
+
+## Step 17
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Integrated preprocessing pipeline into run()
+  - Generated chunk manifest as pipeline output
+- Verification: PASSED
+- Deviations:
+  - Fixed-window fallback intentionally deferred to the next atomic step.
