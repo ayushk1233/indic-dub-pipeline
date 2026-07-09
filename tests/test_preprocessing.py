@@ -7,7 +7,7 @@ from src.stages.preprocessing.segmentation import Segmenter
 from src.stages.preprocessing.validator import validate_media
 
 
-TEST_AUDIO = "/System/Library/Sounds/Glass.aiff"
+TEST_AUDIO = "test.mp4"
 
 
 def test_validate_media():

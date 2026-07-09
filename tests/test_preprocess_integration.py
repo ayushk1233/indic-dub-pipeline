@@ -6,7 +6,7 @@ import yaml
 from src.stages.preprocess import FFmpegPreprocessStage
 
 
-TEST_AUDIO = "/System/Library/Sounds/Glass.aiff"
+TEST_AUDIO = "test.mp4"
 
 
 def load_cfg():
