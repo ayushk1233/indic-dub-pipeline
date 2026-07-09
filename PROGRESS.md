@@ -155,3 +155,12 @@
 - Verification: PASSED
 - Deviations:
   - No behavior changes. Refactoring infrastructure only.
+
+## Step 21
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Extracted validation logic into preprocessing/validator.py
+  - FFmpegPreprocessStage now delegates validation
+- Verification: PASSED
+- Deviations:
+  - None

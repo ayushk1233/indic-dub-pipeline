@@ -8,6 +8,7 @@ import ffmpeg
 
 from src.orchestrator.models import StageResult, StageStatus
 from src.stages.base import PipelineStage
+from src.stages.preprocessing.validator import validate_media
 
 
 class FFmpegPreprocessStage(PipelineStage):
@@ -21,32 +22,7 @@ class FFmpegPreprocessStage(PipelineStage):
     MIN_SEGMENT_DURATION_S = 0.25
 
     def validate_input(self, input_path: str) -> bool:
-        path = Path(input_path)
-
-        if not (
-            path.exists()
-            and path.is_file()
-            and path.stat().st_size > 0
-        ):
-            return False
-
-        try:
-            probe = ffmpeg.probe(str(path))
-        except ffmpeg.Error:
-            return False
-
-        audio_streams = [
-            stream
-            for stream in probe.get("streams", [])
-            if stream.get("codec_type") == "audio"
-        ]
-
-        if not audio_streams:
-            return False
-
-        duration = float(probe.get("format", {}).get("duration", 0))
-
-        return duration > 0
+        return validate_media(input_path)
 
     def detect_silences(
         self,
