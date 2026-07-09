@@ -147,3 +147,11 @@
 - Verification: PASSED
 - Deviations:
   - Existing JSON manifest intentionally unchanged. Models introduced first to preserve backward compatibility.
+
+## Step 20
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Created preprocessing package
+- Verification: PASSED
+- Deviations:
+  - No behavior changes. Refactoring infrastructure only.
