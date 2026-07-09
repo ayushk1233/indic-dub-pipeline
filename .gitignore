@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Model checkpoints
+models/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Audio / Video outputs
+outputs/
+artifacts/
+*.wav
+*.mp3
+*.flac
+*.aac
+*.m4a
+*.mp4
+*.mov
+*.mkv
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Coverage
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Misc
+*.tmp
