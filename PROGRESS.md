@@ -217,3 +217,11 @@
 - Verification: PASSED
 - Deviations:
   - End-to-end integration tests intentionally deferred to the next step.
+
+## Step 28
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Added fixed-window segmentation fallback
+- Verification: PASSED
+- Deviations:
+  - Chunk size temporarily hardcoded (30 s / 1 s overlap). Will become configurable in a later configuration refinement.

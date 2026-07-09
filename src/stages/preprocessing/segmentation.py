@@ -7,6 +7,8 @@ import ffmpeg
 
 class Segmenter:
     MIN_SEGMENT_DURATION_S = 0.25
+    FALLBACK_WINDOW_SECONDS = 30.0
+    FALLBACK_OVERLAP_SECONDS = 1.0
 
     def detect_silences(
         self,
@@ -81,6 +83,34 @@ class Segmenter:
 
         if duration >= self.MIN_SEGMENT_DURATION_S:
             segments.append((current_start, total_duration))
+
+        return segments
+
+    def build_fixed_window_segments(
+        self,
+        total_duration: float,
+    ) -> list[tuple[float, float]]:
+        """
+        Generate fixed-duration segments when silence detection
+        does not produce usable speech segments.
+        """
+
+        segments = []
+
+        start = 0.0
+
+        while start < total_duration:
+            end = min(
+                start + self.FALLBACK_WINDOW_SECONDS,
+                total_duration,
+            )
+
+            segments.append((start, end))
+
+            if end >= total_duration:
+                break
+
+            start = end - self.FALLBACK_OVERLAP_SECONDS
 
         return segments
 

@@ -64,6 +64,11 @@ class FFmpegPreprocessStage(PipelineStage):
             total_duration,
         )
 
+        if not segments:
+            segments = segmenter.build_fixed_window_segments(
+                total_duration,
+            )
+
         chunk_paths = segmenter.extract_segments(
             str(output_audio),
             segments,
