@@ -1,0 +1,12 @@
+faster-whisper
+jiwer
+fastapi
+uvicorn[standard]
+celery
+redis
+pydantic
+pyyaml
+ffmpeg-python
+onnxruntime
+sqlalchemy
+python-multipart
