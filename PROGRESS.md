@@ -61,3 +61,12 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 10
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Implemented FFmpegPreprocessStage
+  - Implemented lightweight validate_input()
+- Verification: PASSED
+- Deviations:
+  - ffprobe-based validation intentionally deferred to the next atomic step.
