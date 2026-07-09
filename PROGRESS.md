@@ -297,3 +297,11 @@
 - Verification: PASSED
 - Deviations:
   - Default language set to "en" for deterministic MVP behavior.
+
+## Step 38
+- Phase/Day: Phase 2 / Day 2
+- Completed:
+  - Added ASR evaluation metrics (WER, CER, confidence, average segment duration)
+- Verification: PASSED
+- Deviations:
+  - Uses manually supplied reference transcript for MVP evaluation.
