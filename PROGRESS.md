@@ -190,3 +190,13 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 25
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Introduced Segmenter service
+  - Moved silence detection, segment generation, and chunk extraction into Segmenter
+  - FFmpegPreprocessStage now delegates segmentation
+- Verification: PASSED
+- Deviations:
+  - None

@@ -9,6 +9,7 @@ import ffmpeg
 from src.orchestrator.models import StageResult, StageStatus
 from src.stages.base import PipelineStage
 from src.stages.preprocessing.audio import AudioProcessor
+from src.stages.preprocessing.segmentation import Segmenter
 from src.stages.preprocessing.validator import validate_media
 
 
@@ -20,115 +21,10 @@ class FFmpegPreprocessStage(PipelineStage):
     FFmpeg probing and extraction will be added in later atomic steps.
     """
 
-    MIN_SEGMENT_DURATION_S = 0.25
-
     def validate_input(self, input_path: str) -> bool:
         return validate_media(input_path)
 
-    def detect_silences(
-        self,
-        audio_path: str,
-        noise: str = "-30dB",
-        duration: float = 0.5,
-    ) -> list[tuple[float, float]]:
-        """
-        Returns a list of (silence_start, silence_end) tuples.
-        """
 
-        command = [
-            "ffmpeg",
-            "-i",
-            audio_path,
-            "-af",
-            f"silencedetect=noise={noise}:d={duration}",
-            "-f",
-            "null",
-            "-"
-        ]
-
-        process = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-        )
-
-        output = process.stderr
-
-        starts = [
-            float(x)
-            for x in re.findall(
-                r"silence_start:\s*([0-9.]+)",
-                output,
-            )
-        ]
-
-        ends = [
-            float(x)
-            for x in re.findall(
-                r"silence_end:\s*([0-9.]+)",
-                output,
-            )
-        ]
-
-        return list(zip(starts, ends))
-
-    def build_segments(
-        self,
-        silences: list[tuple[float, float]],
-        total_duration: float,
-    ) -> list[tuple[float, float]]:
-        """
-        Convert silence intervals into speech segments.
-
-        Returns:
-            [(speech_start, speech_end), ...]
-        """
-
-        segments = []
-        current_start = 0.0
-
-        for silence_start, silence_end in silences:
-            duration = silence_start - current_start
-
-            if duration >= self.MIN_SEGMENT_DURATION_S:
-                segments.append((current_start, silence_start))
-            current_start = silence_end
-
-        duration = total_duration - current_start
-
-        if duration >= self.MIN_SEGMENT_DURATION_S:
-            segments.append((current_start, total_duration))
-
-        return segments
-
-    def extract_segments(
-        self,
-        audio_path: str,
-        segments: list[tuple[float, float]],
-        output_dir: Path,
-    ) -> list[Path]:
-        """
-        Extract each speech segment into an individual WAV file.
-        """
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        chunk_paths: list[Path] = []
-
-        for index, (start, end) in enumerate(segments):
-            chunk_path = output_dir / f"chunk_{index:04d}.wav"
-
-            (
-                ffmpeg
-                .input(audio_path, ss=start, to=end)
-                .output(str(chunk_path))
-                .overwrite_output()
-                .run(quiet=True)
-            )
-
-            chunk_paths.append(chunk_path)
-
-        return chunk_paths
 
     def write_manifest(
         self,
@@ -186,14 +82,16 @@ class FFmpegPreprocessStage(PipelineStage):
 
         total_duration = audio_processor.duration(output_audio)
 
-        silences = self.detect_silences(str(output_audio))
+        segmenter = Segmenter()
 
-        segments = self.build_segments(
+        silences = segmenter.detect_silences(str(output_audio))
+
+        segments = segmenter.build_segments(
             silences,
             total_duration,
         )
 
-        chunk_paths = self.extract_segments(
+        chunk_paths = segmenter.extract_segments(
             str(output_audio),
             segments,
             output_dir / "chunks",
