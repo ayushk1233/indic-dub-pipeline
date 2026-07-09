@@ -164,3 +164,12 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 22
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Extracted audio normalization into preprocessing/audio.py
+  - Extracted audio duration helper
+- Verification: PASSED
+- Deviations:
+  - None
