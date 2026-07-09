@@ -92,6 +92,31 @@ class FFmpegPreprocessStage(PipelineStage):
 
         return list(zip(starts, ends))
 
+    def build_segments(
+        self,
+        silences: list[tuple[float, float]],
+        total_duration: float,
+    ) -> list[tuple[float, float]]:
+        """
+        Convert silence intervals into speech segments.
+
+        Returns:
+            [(speech_start, speech_end), ...]
+        """
+
+        segments = []
+        current_start = 0.0
+
+        for silence_start, silence_end in silences:
+            if silence_start > current_start:
+                segments.append((current_start, silence_start))
+            current_start = silence_end
+
+        if current_start < total_duration:
+            segments.append((current_start, total_duration))
+
+        return segments
+
     def run(
         self,
         input_path: str,
