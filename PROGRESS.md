@@ -33,3 +33,11 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 7
+- Phase/Day: Day 0
+- Completed:
+  - Added pipeline configuration
+- Verification: PASSED
+- Deviations:
+  - TTS device intentionally set to CUDA because synthesis will execute in Colab during Phase 3.

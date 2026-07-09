@@ -1,0 +1,17 @@
+asr:
+  model: "large-v3"
+  device: "cpu"
+  compute_type: "int8"
+  vad_filter: true
+
+translate:
+  model: "ai4bharat/indictrans2-en-indic-1B"
+  device: "cpu"
+
+tts:
+  model: "coqui/xtts_v2"
+  device: "cuda"
+
+audio:
+  sample_rate: 16000
+  channels: 1
