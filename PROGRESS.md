@@ -233,3 +233,11 @@
 - Verification: PASSED
 - Deviations:
   - MP4 integration test uses existing preprocessing pipeline; dedicated no-audio video fixture will be added later.
+
+## Step 30
+- Phase/Day: Phase 1 / Integration Testing
+- Completed:
+  - Added concurrent preprocessing integration test
+- Verification: PASSED
+- Deviations:
+  - Uses ThreadPoolExecutor because Celery orchestration has not yet been introduced.
