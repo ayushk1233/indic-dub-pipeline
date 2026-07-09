@@ -70,3 +70,13 @@
 - Verification: PASSED
 - Deviations:
   - ffprobe-based validation intentionally deferred to the next atomic step.
+
+## Step 11
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Added ffprobe-based media validation
+  - Added audio stream verification
+  - Added duration verification
+- Verification: PASSED
+- Deviations:
+  - None
