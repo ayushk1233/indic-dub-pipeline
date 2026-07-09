@@ -80,3 +80,13 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 12
+- Phase/Day: Phase 1 / Day 1
+- Completed:
+  - Implemented FFmpeg audio extraction
+  - Implemented audio normalization
+  - Implemented StageResult output
+- Verification: PASSED
+- Deviations:
+  - Silence detection and manifest generation intentionally deferred to the next atomic step.

@@ -1,8 +1,9 @@
+import time
 from pathlib import Path
 
 import ffmpeg
 
-from src.orchestrator.models import StageResult
+from src.orchestrator.models import StageResult, StageStatus
 from src.stages.base import PipelineStage
 
 
@@ -48,6 +49,42 @@ class FFmpegPreprocessStage(PipelineStage):
         job_id: str,
         cfg: dict,
     ) -> StageResult:
-        raise NotImplementedError(
-            "run() will be implemented in the next step."
+        if not self.validate_input(input_path):
+            return StageResult(
+                stage_name="preprocess",
+                status=StageStatus.FAILED,
+                error="Input validation failed.",
+            )
+
+        output_dir = Path("artifacts") / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_audio = output_dir / "audio.wav"
+
+        start = time.perf_counter()
+
+        (
+            ffmpeg
+            .input(input_path)
+            .output(
+                str(output_audio),
+                ar=cfg["audio"]["sample_rate"],
+                ac=cfg["audio"]["channels"],
+                format="wav",
+            )
+            .overwrite_output()
+            .run(quiet=True)
+        )
+
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        return StageResult(
+            stage_name="preprocess",
+            status=StageStatus.DONE,
+            output_path=str(output_audio),
+            metrics={
+                "latency_ms": latency_ms,
+                "sample_rate": cfg["audio"]["sample_rate"],
+                "channels": cfg["audio"]["channels"],
+            },
         )
