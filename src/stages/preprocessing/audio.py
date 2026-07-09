@@ -4,47 +4,62 @@ import time
 import ffmpeg
 
 
-def extract_normalized_audio(
-    input_path: str,
-    output_dir: Path,
-    sample_rate: int,
-    channels: int,
-) -> tuple[Path, float]:
+class AudioProcessor:
     """
-    Extract and normalize audio to WAV.
-
-    Returns:
-        (output_audio_path, latency_ms)
+    Handles extraction and normalization of audio inputs.
     """
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        sample_rate: int,
+        channels: int,
+    ) -> None:
+        self.sample_rate = sample_rate
+        self.channels = channels
 
-    output_audio = output_dir / "audio.wav"
+    def extract(
+        self,
+        input_path: str,
+        output_dir: Path,
+    ) -> tuple[Path, float]:
+        """
+        Extract and normalize audio to WAV.
 
-    start = time.perf_counter()
+        Returns:
+            (output_audio_path, latency_ms)
+        """
 
-    (
-        ffmpeg
-        .input(input_path)
-        .output(
-            str(output_audio),
-            ar=sample_rate,
-            ac=channels,
-            format="wav",
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_audio = output_dir / "audio.wav"
+
+        start = time.perf_counter()
+
+        (
+            ffmpeg
+            .input(input_path)
+            .output(
+                str(output_audio),
+                ar=self.sample_rate,
+                ac=self.channels,
+                format="wav",
+            )
+            .overwrite_output()
+            .run(quiet=True)
         )
-        .overwrite_output()
-        .run(quiet=True)
-    )
 
-    latency_ms = (time.perf_counter() - start) * 1000
+        latency_ms = (time.perf_counter() - start) * 1000
 
-    return output_audio, latency_ms
+        return output_audio, latency_ms
 
+    def duration(
+        self,
+        audio_path: Path,
+    ) -> float:
+        """
+        Return duration in seconds.
+        """
 
-def get_audio_duration(audio_path: Path) -> float:
-    """
-    Return duration of normalized audio in seconds.
-    """
+        probe = ffmpeg.probe(str(audio_path))
 
-    probe = ffmpeg.probe(str(audio_path))
-    return float(probe["format"]["duration"])
+        return float(probe["format"]["duration"])

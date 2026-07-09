@@ -8,10 +8,7 @@ import ffmpeg
 
 from src.orchestrator.models import StageResult, StageStatus
 from src.stages.base import PipelineStage
-from src.stages.preprocessing.audio import (
-    extract_normalized_audio,
-    get_audio_duration,
-)
+from src.stages.preprocessing.audio import AudioProcessor
 from src.stages.preprocessing.validator import validate_media
 
 
@@ -177,14 +174,17 @@ class FFmpegPreprocessStage(PipelineStage):
 
         start = time.perf_counter()
 
-        output_audio, _ = extract_normalized_audio(
-            input_path=input_path,
-            output_dir=output_dir,
+        audio_processor = AudioProcessor(
             sample_rate=cfg["audio"]["sample_rate"],
             channels=cfg["audio"]["channels"],
         )
 
-        total_duration = get_audio_duration(output_audio)
+        output_audio, latency_ms = audio_processor.extract(
+            input_path=input_path,
+            output_dir=output_dir,
+        )
+
+        total_duration = audio_processor.duration(output_audio)
 
         silences = self.detect_silences(str(output_audio))
 

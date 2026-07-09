@@ -173,3 +173,12 @@
 - Verification: PASSED
 - Deviations:
   - None
+
+## Step 23
+- Phase/Day: Phase 1 / Refactoring
+- Completed:
+  - Introduced AudioProcessor service
+  - FFmpegPreprocessStage now delegates audio extraction to AudioProcessor
+- Verification: PASSED
+- Deviations:
+  - None
