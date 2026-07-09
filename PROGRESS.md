@@ -289,3 +289,11 @@
 - Verification: PASSED
 - Deviations:
   - Uses first transcription result for language detection.
+
+## Step 37
+- Phase/Day: Phase 2 / Day 2
+- Completed:
+  - Added configurable ASR language hint
+- Verification: PASSED
+- Deviations:
+  - Default language set to "en" for deterministic MVP behavior.

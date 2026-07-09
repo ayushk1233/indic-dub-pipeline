@@ -3,6 +3,7 @@ asr:
   device: "cpu"
   compute_type: "int8"
   vad_filter: true
+  language: "en"
 
 translate:
   model: "ai4bharat/indictrans2-en-indic-1B"

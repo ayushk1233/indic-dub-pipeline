@@ -13,10 +13,12 @@ class FasterWhisperBackend(InferenceBackend):
         model_name: str,
         device: str,
         compute_type: str,
+        language: str,
     ) -> None:
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
+        self.language = language
         self.model = None
 
     def load(self) -> None:
@@ -33,4 +35,10 @@ class FasterWhisperBackend(InferenceBackend):
         if self.model is None:
             raise RuntimeError("Model not loaded.")
 
-        return self.model.transcribe(audio_path)
+        if self.language == "auto":
+            return self.model.transcribe(audio_path)
+
+        return self.model.transcribe(
+            audio_path,
+            language=self.language,
+        )
