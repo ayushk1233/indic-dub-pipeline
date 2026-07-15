@@ -112,6 +112,18 @@ class XTTSWorker:
                 temperature=0.7,
             )
 
+        print("Inference output keys:", out.keys())
+        for k, v in out.items():
+            if hasattr(v, "shape"):
+                print(f"{k}: shape={v.shape}")
+            elif isinstance(v, (list, tuple)):
+                print(f"{k}: len={len(v)}")
+            else:
+                print(f"{k}: {type(v)} -> {v}")
+
+        print("Generated samples:", len(out["wav"]))
+        print("Approx duration:", len(out["wav"]) / 24000)
+
         wav = torch.tensor(out["wav"]).unsqueeze(0)
         
         output_filename = f"chunk_{segment.chunk_id:04d}.wav"
