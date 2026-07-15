@@ -389,3 +389,12 @@
 - Verification: PASSED
 - Deviations:
   - synthesize() intentionally raises NotImplementedError until external GPU execution completes.
+
+## Step 49
+- Phase/Day: Phase 3 / Day 3
+- Completed:
+  - Created bundle exchange scaffold
+  - Introduced artifact-based GPU boundary
+- Verification: PASSED
+- Deviations:
+  - Replaced Colab-specific workflow with transport-agnostic bundle architecture.
