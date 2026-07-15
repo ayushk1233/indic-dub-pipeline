@@ -37,11 +37,21 @@ class XTTSWorker:
         with open(self.request_path, "r", encoding="utf-8") as f:
             self.request = SynthesisRequest(**json.load(f))
 
-    def load_model(self) -> None:
+    def load_model(self):
         """
         Load the XTTS-v2 model and compute the speaker embedding.
         """
-        raise NotImplementedError
+        from colab.preflight import PreflightValidator
+        
+        validator = PreflightValidator()
+        diagnostics = validator.run()
+        print("Preflight diagnostics:", diagnostics)
+
+        from TTS.api import TTS
+        
+        print("Loading XTTS-v2...")
+        self.model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda")
+        return self.model
 
     def synthesize_segment(self) -> None:
         """
