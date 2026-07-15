@@ -37,6 +37,9 @@ class XTTSWorker:
 
         with open(self.request_path, "r", encoding="utf-8") as f:
             self.request = SynthesisRequest(**json.load(f))
+            
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def load_model(self):
         """
