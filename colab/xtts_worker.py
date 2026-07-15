@@ -16,6 +16,7 @@ class XTTSWorker:
         self.manifest = None
         self.model = None
         self.speaker_embedding = None
+        self.gpt_cond_latent = None
 
     def load_bundle(self) -> None:
         """
@@ -55,6 +56,31 @@ class XTTSWorker:
         print("Loading XTTS-v2...")
         self.model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda")
         return self.model
+
+    def compute_speaker_embedding(self):
+        """
+        Compute GPT conditioning latent and speaker embedding from reference audio.
+        """
+        if self.speaker_embedding is not None and getattr(self, "gpt_cond_latent", None) is not None:
+            return self.gpt_cond_latent, self.speaker_embedding
+
+        if self.model is None:
+            self.load_model()
+
+        reference_wav = self.bundle_dir / "request" / "reference.wav"
+        if not reference_wav.exists():
+            raise FileNotFoundError(f"Reference audio not found: {reference_wav}")
+
+        print("Computing speaker embeddings...")
+        xtts_model = self.model.synthesizer.tts_model
+        gpt_cond_latent, speaker_embedding = xtts_model.get_conditioning_latents(
+            audio_path=[str(reference_wav)]
+        )
+
+        self.gpt_cond_latent = gpt_cond_latent
+        self.speaker_embedding = speaker_embedding
+
+        return self.gpt_cond_latent, self.speaker_embedding
 
     def synthesize_segment(self) -> None:
         """
