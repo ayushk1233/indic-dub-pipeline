@@ -444,3 +444,12 @@
 - Verification: PASSED
 - Deviations:
   - Speaker embedding intentionally deferred.
+
+## Step 55
+- Phase/Day: Phase 3 / Day 3
+- Completed:
+  - Added bundle ZIP packaging
+  - Standardized portable GPU artifact
+- Verification: PASSED
+- Deviations:
+  - Bundle signing/checksums deferred to a future version.

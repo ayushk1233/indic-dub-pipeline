@@ -1,5 +1,6 @@
 import json
 import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -64,3 +65,28 @@ class BundleExporter:
             )
 
         return output_dir
+
+    def package_bundle(
+        self,
+        bundle_dir: Path,
+    ) -> Path:
+        if not bundle_dir.exists() or not bundle_dir.is_dir():
+            raise FileNotFoundError(f"Bundle directory not found: {bundle_dir}")
+
+        manifest_path = bundle_dir / "manifest.json"
+        request_json_path = bundle_dir / "request" / "synthesis_request.json"
+        reference_audio_path = bundle_dir / "request" / "reference.wav"
+
+        for required_file in [manifest_path, request_json_path, reference_audio_path]:
+            if not required_file.exists():
+                raise FileNotFoundError(f"Missing required bundle file: {required_file}")
+
+        zip_path = bundle_dir.with_name(bundle_dir.name + ".zip")
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in bundle_dir.rglob("*"):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(bundle_dir)
+                    zipf.write(file_path, arcname)
+
+        return zip_path
