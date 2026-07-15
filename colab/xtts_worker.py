@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from src.stages.tts.models import SynthesisRequest
+
 
 class XTTSWorker:
     def __init__(self, bundle_dir: Path):
@@ -10,7 +12,7 @@ class XTTSWorker:
         self.output_dir = bundle_dir / "output"
         self.logs_dir = bundle_dir / "logs"
 
-        self.request = None
+        self.request: SynthesisRequest | None = None
         self.manifest = None
         self.model = None
         self.speaker_embedding = None
@@ -33,7 +35,7 @@ class XTTSWorker:
             raise FileNotFoundError(f"Request not found: {self.request_path}")
 
         with open(self.request_path, "r", encoding="utf-8") as f:
-            self.request = json.load(f)
+            self.request = SynthesisRequest(**json.load(f))
 
     def load_model(self) -> None:
         """
