@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from src.stages.tts.models import SynthesisRequest
+from src.stages.tts.models import SynthesisRequest, SynthesisSegment
 
 
 class XTTSWorker:
@@ -82,11 +82,41 @@ class XTTSWorker:
 
         return self.gpt_cond_latent, self.speaker_embedding
 
-    def synthesize_segment(self) -> None:
+    def synthesize_segment(self, segment: SynthesisSegment) -> Path:
         """
         Synthesize a single audio segment.
         """
-        raise NotImplementedError
+        import torch
+        import torchaudio
+
+        if self.model is None:
+            self.load_model()
+            
+        if self.gpt_cond_latent is None or self.speaker_embedding is None:
+            self.compute_speaker_embedding()
+
+        print(f"Synthesizing segment {segment.segment_id} (chunk {segment.chunk_id})...")
+        
+        language = self.request.language
+        xtts_model = self.model.synthesizer.tts_model
+        
+        with torch.no_grad():
+            out = xtts_model.inference(
+                text=segment.text,
+                language=language,
+                gpt_cond_latent=self.gpt_cond_latent,
+                speaker_embedding=self.speaker_embedding,
+                temperature=0.7,
+            )
+
+        wav = torch.tensor(out["wav"]).unsqueeze(0)
+        
+        output_filename = f"chunk_{segment.chunk_id:04d}.wav"
+        output_path = self.output_dir / output_filename
+        
+        torchaudio.save(str(output_path), wav, 24000)
+        
+        return output_path
 
     def save_segment(self) -> None:
         """
