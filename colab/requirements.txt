@@ -1,6 +1,6 @@
-TTS
-torch
-torchaudio
+torch==2.5.1
+torchaudio==2.5.1
+TTS==0.22.0
 soundfile
 librosa
 pydantic
