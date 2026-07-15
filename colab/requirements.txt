@@ -1,0 +1,7 @@
+TTS
+torch
+torchaudio
+soundfile
+librosa
+pydantic
+tqdm
