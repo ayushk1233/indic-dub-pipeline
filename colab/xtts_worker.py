@@ -41,6 +41,9 @@ class XTTSWorker:
         """
         Load the XTTS-v2 model and compute the speaker embedding.
         """
+        if self.model is not None:
+            return self.model
+
         from colab.preflight import PreflightValidator
         
         validator = PreflightValidator()
