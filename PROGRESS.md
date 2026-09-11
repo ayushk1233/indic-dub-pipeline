@@ -480,3 +480,28 @@
 - Verification: PASSED
 - Deviations:
   - None
+## Step 59
+- Phase/Day: Phase 4 / Evaluation
+- Completed:
+  - Fixed XTTSWorker: greedy decoding and repetition penalty on inference(), conditioning
+    lengths on get_conditioning_latents() where they take effect, temperature removed
+  - Fixed output filenames to use segment_id instead of the shared chunk_id
+  - Implemented write_result() and a full run() loop with per-segment error isolation
+  - Added speaker-similarity and GPT-token capture to the synthesis result
+  - Added per-stage eval metrics: preprocess_metrics, tts_metrics, translation feasibility,
+    reference-free ASR signals
+  - Implemented eval/harness.py as a QC report aggregator with a CLI
+  - Added colab/run_bundle.ipynb to replace the exploratory notebook
+  - Added 12 eval regression tests (19 total, all passing)
+- Verification: PASSED (pytest tests/ -q -> 19 passed; harness run against
+  artifacts/test_mp4_job reproduces the measured pace figures)
+- Deviations:
+  - save_segment() was folded into synthesize_segment() rather than implemented separately,
+    since the duration and sample count come free from the inference output.
+  - Translation feasibility uses heuristic natural speaking rates per language, not measured
+    ones. They are defined in one table in translation_metrics.py and should be replaced with
+    figures measured from real speech when available.
+  - Round-trip intelligibility is implemented but not wired into the harness, because it needs
+    a loaded ASR backend and would make the report depend on model download.
+  - The bundle importer and the local synthesis-result path remain unwritten, so the harness
+    reads the bundle directory directly for now.

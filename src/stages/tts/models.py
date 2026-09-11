@@ -34,6 +34,9 @@ class SynthesisRequest(BaseModel):
 class SynthesizedSegment(BaseModel):
     """
     Output produced by XTTS.
+
+    Paths are stored relative to the bundle root, because the file is
+    written on the GPU host and read somewhere else entirely.
     """
 
     segment_id: int
@@ -42,6 +45,20 @@ class SynthesizedSegment(BaseModel):
     audio_path: str
 
     duration: float
+
+    num_samples: int = 0
+
+    status: str = "done"
+
+    error: str | None = None
+
+    # Number of GPT audio tokens generated. A value at the decoder's
+    # ceiling means generation never terminated on its own.
+    gpt_tokens: int | None = None
+
+    # Cosine similarity between the reference speaker embedding and one
+    # recomputed from this segment's audio. 1.0 is identical.
+    speaker_similarity: float | None = None
 
 
 class SynthesisResult(BaseModel):
@@ -52,5 +69,12 @@ class SynthesisResult(BaseModel):
     job_id: str
 
     sample_rate: int
+
+    model_id: str | None = None
+
+    # The exact inference kwargs used. This project's central failure mode
+    # was a decoder parameter silently changing the output, so the settings
+    # that produced a given audio file belong in the artifact beside it.
+    params: dict = Field(default_factory=dict)
 
     segments: list[SynthesizedSegment] = Field(default_factory=list)

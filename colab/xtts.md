@@ -412,3 +412,7 @@ The investigation produced a stable, deterministic XTTS-v2 baseline suitable for
 - ✔ Established `do_sample=False` as the production baseline for deterministic speech generation.
 
 This configuration should serve as the reference implementation for the TTS stage of the dubbing pipeline until future model evaluations justify revisiting decoder settings or adopting a newer XTTS release.
+
+for shorter reference.wav the do_sampling=False is giving bad results 
+for longer reference.wav the do sampling=False is giving good results with a fixed gap of the audio duration 
+and do sampling = True is giving random duration of the audio

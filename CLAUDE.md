@@ -1,0 +1,118 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Indic Speech Dubbing & QC Pipeline: video/audio in one language goes in, dubbed audio in an Indic
+language comes out. Four stages run in order — preprocess (FFmpeg), ASR (Faster-Whisper),
+translation (IndicTrans2), TTS (XTTS-v2). The first three run locally on CPU; TTS runs on an
+external GPU.
+
+## Commands
+
+Everything runs from the repo root with the local virtualenv (Python 3.11). The venv was created at
+an older path, so invoke its interpreter directly rather than relying on `activate`:
+
+```bash
+./venv/bin/python -m pytest tests/ -v
+```
+
+Single test:
+
+```bash
+./venv/bin/python -m pytest tests/test_preprocessing.py::test_build_segments -v
+```
+
+Tests use relative paths (`test.mp4`, `config/pipeline.yaml`) and write into `artifacts/`, so they
+only pass when run from the repo root. There is no linter, formatter, or build step configured.
+
+`requirements.txt` covers the orchestration and preprocessing/ASR dependencies only. The translation
+backend needs `torch` and `transformers`, which are installed in the venv but absent from the file.
+Colab dependencies are pinned separately in [colab/requirements.txt](colab/requirements.txt).
+
+## Architecture
+
+### Stage contract
+
+Every stage implements [PipelineStage](src/stages/base.py): `validate_input(path) -> bool` and
+`run(input_path, job_id, cfg) -> StageResult`. Orchestration code should only ever talk to that
+interface. `StageResult` carries a status enum, an output path, and a free-form `metrics` dict, all
+defined in [src/orchestrator/models.py](src/orchestrator/models.py).
+
+Only preprocessing implements `PipelineStage` today. ASR, translation, and TTS are built as
+processors that are not yet wrapped in stages, and the orchestrator, database, and serving layers are
+empty placeholder files.
+
+### Backend/processor split
+
+Each of ASR, translation, and TTS follows the same three-file shape inside its package:
+
+- `backend.py` — abstract inference interface (`load()` plus one inference method).
+- `<vendor>_backend.py` — the concrete model implementation, holding all model-specific details.
+- `processor.py` — orchestrates the backend over a whole job and returns typed Pydantic results.
+
+Model-specific knowledge stays behind the backend boundary. For example the FLORES language tags
+(`hin_Deva`, `tam_Taml`) live only in [indictrans2_backend.py](src/stages/translation/indictrans2_backend.py);
+everything upstream uses plain two-letter codes.
+
+### Data flow between stages
+
+Stages hand off through files on disk under `artifacts/<job_id>/`, not in-memory objects.
+Preprocessing writes `audio.wav`, `chunks/chunk_NNNN.wav`, and `manifest.json`. The ASR processor
+reads that manifest path and derives `job_id` from the parent directory name. Timestamps are always
+absolute against the source media: the ASR processor adds each chunk's `start_ts` to the per-chunk
+offsets Whisper returns, and every downstream model carries `segment_id`, `chunk_id`, `start_ts`, and
+`end_ts` so alignment survives translation and synthesis.
+
+Note that [ManifestWriter](src/stages/preprocessing/manifest.py) emits a bare JSON list, while
+[ChunkManifest](src/stages/preprocessing/models.py) describes a richer object. The typed models were
+added first and the writer has not been migrated, so the two do not currently agree.
+
+### Segmentation
+
+[Segmenter](src/stages/preprocessing/segmentation.py) finds speech by inverting FFmpeg's
+`silencedetect` output, parsed out of stderr with regexes. Segments shorter than 0.25 s are dropped.
+When silence detection yields nothing usable, `preprocess.py` falls back to fixed 30 s windows with
+1 s overlap. Those thresholds are class constants and are deliberately not in `pipeline.yaml` yet.
+
+### The GPU boundary
+
+XTTS needs CUDA, which the local machine does not have, so TTS is split across a file-based
+boundary rather than a network call. The local side builds a `SynthesisRequest` and
+[BundleExporter](src/stages/tts/bundle/exporter.py) writes a versioned bundle directory
+(`manifest.json`, `request/synthesis_request.json`, `request/reference.wav`, empty `output/` and
+`logs/`) which can be zipped and carried anywhere. On the GPU side,
+[XTTSWorker](colab/xtts_worker.py) reads the bundle, checks `bundle_version == "1.0"`, runs GPU
+preflight checks, loads XTTS, and synthesizes.
+
+Treat Colab as one transport, not as the architecture. `ExternalExecutionBackend` in
+[src/stages/tts/backend.py](src/stages/tts/backend.py) is the general contract: export a request,
+import a result. `ColabTTSBackend.synthesize()` raises `NotImplementedError` on purpose, because
+execution happens elsewhere.
+
+The worker's result writing is still unimplemented, and `XTTSWorker.run()` calls `.get()` on
+`self.request`, which is a Pydantic model rather than a dict, so the end-to-end worker path does not
+run yet.
+
+### XTTS configuration
+
+[colab/xtts.md](colab/xtts.md) records why the current XTTS settings were chosen. The short version:
+random output durations came from stochastic decoding, not from checkpoints or dependencies, and
+`do_sample=False` fixes it. Preferred conditioning is `gpt_cond_len=8`, `gpt_cond_chunk_len=4`,
+`max_ref_len=10`. Do not pass `temperature`, `top_k`, or `top_p` alongside `do_sample=False`. One
+caveat from the end of that document: greedy decoding degrades with short reference audio, and
+`synthesize_segment()` in the worker still passes `temperature=0.7` without setting `do_sample`.
+Read that document before changing any inference parameter.
+
+## Conventions
+
+- Config comes from [config/pipeline.yaml](config/pipeline.yaml), loaded with `yaml.safe_load` and
+  passed to stages as a plain dict. TTS device is `cuda` even though the rest is `cpu`, because
+  synthesis executes externally.
+- Every cross-stage data structure is a Pydantic model. Evaluation metrics in `src/eval/` are plain
+  dataclasses instead.
+- Imports are absolute from `src.`, so commands must run from the repo root.
+- After each unit of work, append an entry to [PROGRESS.md](PROGRESS.md) in the existing format:
+  step number, phase/day, what was completed, a verification line, and any deviations. Deviations are
+  used to record intentionally deferred work, so state what was deferred and why.
