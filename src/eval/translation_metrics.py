@@ -3,29 +3,55 @@ from dataclasses import dataclass, field
 from src.stages.translation.models import TranslationResult
 
 
-# Approximate natural conversational speaking rate in characters per second.
+# Natural speaking rate in characters per second, used to judge a segment
+# feasible before any GPU time is spent on it. If translated text needs a rate
+# far above these, no TTS setting will make it fit and the fix belongs at
+# translation or segmentation time.
 #
-# These are heuristic defaults, not measurements. They exist so that a segment
-# can be judged feasible before any GPU time is spent on it: if the translated
-# text needs a rate far above these, no TTS setting will make it fit and the
-# fix belongs at translation or segmentation time.
+# MEASURED entries come from FLEURS, median characters per second over whole
+# recordings by native speakers. Reproduce with:
+#
+#     ./venv/bin/python -m src.data.measure --languages hi
+#
+# and see artifacts/measurements/speaking_rates.json for the distributions.
+# Note these are clip rates: FLEURS recordings carry some leading and trailing
+# silence, so they sit slightly below pure articulation rate. That is the
+# right bias here, because synthesized segments carry the same overhead.
+#
+# ESTIMATED entries have not been measured yet and are the original guesses.
+# Measure them before trusting a feasibility verdict in those languages.
 NATURAL_CPS = {
-    "en": 15.0,
-    "hi": 13.0,
-    "mr": 13.0,
-    "ur": 13.0,
-    "bn": 12.0,
-    "gu": 12.0,
-    "pa": 12.0,
-    "or": 12.0,
-    "ta": 11.0,
-    "te": 11.0,
-    "kn": 11.0,
-    "ml": 11.0,
-    "as": 12.0,
+    "en": 13.13,   # MEASURED, n=394 (was guessed at 15.0)
+    "hi": 10.81,   # MEASURED, n=239 (was guessed at 13.0)
+    "mr": 13.0,    # ESTIMATED
+    "ur": 13.0,    # ESTIMATED
+    "bn": 12.0,    # ESTIMATED
+    "gu": 12.0,    # ESTIMATED
+    "pa": 12.0,    # ESTIMATED
+    "or": 12.0,    # ESTIMATED
+    "ta": 11.0,    # ESTIMATED
+    "te": 11.0,    # ESTIMATED
+    "kn": 11.0,    # ESTIMATED
+    "ml": 11.0,    # ESTIMATED
+    "as": 12.0,    # ESTIMATED
 }
 
+# Languages whose rate came from measurement rather than estimation. Anything
+# reporting a feasibility verdict should be able to say which it relied on.
+MEASURED_LANGUAGES = frozenset({"en", "hi"})
+
 DEFAULT_NATURAL_CPS = 13.0
+
+# Median ratio of Hindi speech duration to English speech duration for the same
+# sentence, measured over 332 n-way-parallel FLEURS pairs. Interquartile range
+# 0.95x to 1.49x.
+#
+# The finding that matters: over the same pairs the character-count ratio is
+# 0.989x. Hindi uses essentially the same number of characters as English to
+# say the same thing, and still takes 19% longer to speak it. The expansion
+# this whole pipeline fights is in articulation rate, not text length, which is
+# why shortening text is only ever part of the fix.
+MEASURED_EXPANSION = {"en>hi": 1.191}
 
 # Unicode ranges per target script, used to detect untranslated passthrough
 # and wrong-script output.

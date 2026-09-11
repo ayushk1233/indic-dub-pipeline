@@ -4,10 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Indic Speech Dubbing & QC Pipeline: video/audio in one language goes in, dubbed audio in an Indic
-language comes out. Four stages run in order — preprocess (FFmpeg), ASR (Faster-Whisper),
-translation (IndicTrans2), TTS (XTTS-v2). The first three run locally on CPU; TTS runs on an
-external GPU.
+Indic Speech Dubbing & QC Pipeline: a video in one language goes in, the same video dubbed into an
+Indic language comes out. Stages run in order — preprocess (FFmpeg), ASR (Faster-Whisper),
+translation (IndicTrans2), synthesis (XTTS-v2), assembly, remux. Everything except synthesis runs
+locally on CPU; synthesis runs on an external GPU.
+
+The problem the project exists around, measured rather than assumed: Hindi takes about 1.2x as long
+to speak as the English it replaces, while dubbing requires it to fit the original timing anyway.
+Most of the interesting code is about closing that gap — choosing translations that fit, and
+absorbing what is left over during assembly.
 
 ## Commands
 
@@ -27,9 +32,28 @@ Single test:
 Tests use relative paths (`test.mp4`, `config/pipeline.yaml`) and write into `artifacts/`, so they
 only pass when run from the repo root. There is no linter, formatter, or build step configured.
 
-`requirements.txt` covers the orchestration and preprocessing/ASR dependencies only. The translation
-backend needs `torch` and `transformers`, which are installed in the venv but absent from the file.
-Colab dependencies are pinned separately in [colab/requirements.txt](colab/requirements.txt).
+Run the whole pipeline:
+
+```bash
+./venv/bin/python -m src.cli --input test.mp4 --job-id demo --target-lang hi --candidates 6
+```
+
+It stops at the GPU boundary with a bundle zip. After synthesis comes back, resume with
+`--from-stage import`. `--candidates 1` turns length control off.
+
+Measure speaking rates and fit the duration model:
+
+```bash
+./venv/bin/python -m src.data.measure --languages hi --limit 300
+./venv/bin/python -m src.eval.duration_model --languages en hi --limit 300
+```
+
+`requirements.txt` is pinned, and the non-obvious pins carry their reasoning inline. The one to know
+about: **transformers is held below 4.47** because IndicTrans2's `trust_remote_code` modelling code
+indexes `past_key_values` as legacy tuples, and newer versions always hand `generate()` a Cache
+object. Transformers 5.x additionally removed `transformers.onnx`, which that same code imports.
+Bumping it silently breaks translation at decode time, not at import time. Colab dependencies are
+pinned separately in [colab/requirements.txt](colab/requirements.txt) and are deliberately different.
 
 ## Architecture
 
@@ -40,9 +64,10 @@ Every stage implements [PipelineStage](src/stages/base.py): `validate_input(path
 interface. `StageResult` carries a status enum, an output path, and a free-form `metrics` dict, all
 defined in [src/orchestrator/models.py](src/orchestrator/models.py).
 
-Only preprocessing implements `PipelineStage` today. ASR, translation, and TTS are built as
-processors that are not yet wrapped in stages, and the orchestrator, database, and serving layers are
-empty placeholder files.
+Only preprocessing implements `PipelineStage`. ASR, translation and TTS are processors that
+[PipelineRunner](src/pipeline/runner.py) drives directly, because they need richer per-stage inputs
+than `run(input_path, job_id, cfg)` provides. The database and serving layers are still empty
+placeholder files.
 
 ### Backend/processor split
 

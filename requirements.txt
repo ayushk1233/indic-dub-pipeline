@@ -1,12 +1,48 @@
-faster-whisper
-jiwer
-fastapi
-uvicorn[standard]
-celery
-redis
-pydantic
-pyyaml
-ffmpeg-python
-onnxruntime
-sqlalchemy
-python-multipart
+# Local pipeline dependencies (CPU). GPU synthesis pins live in
+# colab/requirements.txt and are deliberately different; see the note below.
+#
+# Verified working together on macOS arm64 / Python 3.11.
+
+# --- preprocessing -----------------------------------------------------------
+ffmpeg-python==0.2.0
+
+# --- ASR ---------------------------------------------------------------------
+# CTranslate2 engine, not PyTorch. This is why ASR cannot run inside a
+# Hugging Face ZeroGPU function, which only accelerates PyTorch.
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+
+# --- translation -------------------------------------------------------------
+torch==2.14.0
+# Pinned below 4.47. IndicTrans2 ships custom modelling code via
+# trust_remote_code that indexes past_key_values as legacy tuples; newer
+# transformers always hands generate() a Cache object, so decoding dies with
+# "'NoneType' object has no attribute 'shape'". Transformers 5.x additionally
+# removed transformers.onnx, which the same remote code imports at module
+# scope. Do not bump this without re-running an end-to-end translation.
+transformers==4.46.3
+tokenizers==0.20.3
+sentencepiece==0.2.1
+
+# --- shared ------------------------------------------------------------------
+pydantic==2.13.4
+PyYAML==6.0.3
+numpy==2.4.6
+
+# --- evaluation --------------------------------------------------------------
+jiwer==4.0.0                  # WER/CER, and round-trip intelligibility
+sacrebleu==2.6.0              # chrF++ against FLORES-200 references
+sentence-transformers==5.7.0  # LaBSE cosine, semantic fidelity of candidates
+scikit-learn==1.9.1           # ridge regression for the duration model
+
+# --- measurement dataset -----------------------------------------------------
+datasets==5.0.1               # FLEURS loader
+soundfile==0.14.0
+
+# --- development -------------------------------------------------------------
+pytest==9.1.1
+
+# NOT LISTED, ON PURPOSE: fastapi, uvicorn, celery, redis, sqlalchemy,
+# python-multipart and onnxruntime were declared here before anything imported
+# them. They belong to the asynchronous orchestration work and come back in a
+# separate requirements file when that code actually exists.

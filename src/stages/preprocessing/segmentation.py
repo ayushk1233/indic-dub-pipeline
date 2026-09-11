@@ -10,6 +10,15 @@ class Segmenter:
     FALLBACK_WINDOW_SECONDS = 30.0
     FALLBACK_OVERLAP_SECONDS = 1.0
 
+    # Matches either marker in one pass, in the order FFmpeg emits them, and
+    # accepts a leading '-' because a clip that opens in silence logs a
+    # negative silence_start (e.g. "silence_start: -0.003013"). The old code
+    # used two independent findall() calls with a pattern that could not
+    # match that minus sign: the start was dropped from its list but the
+    # matching end was not, which desynchronized every pair from that point
+    # on when the two lists were zipped.
+    _SILENCE_EVENT_RE = re.compile(r"silence_(start|end):\s*(-?[0-9.]+)")
+
     def detect_silences(
         self,
         audio_path: str,
@@ -37,25 +46,29 @@ class Segmenter:
             text=True,
         )
 
-        output = process.stderr
+        return self._parse_silences(process.stderr)
 
-        starts = [
-            float(x)
-            for x in re.findall(
-                r"silence_start:\s*([0-9.]+)",
-                output,
-            )
-        ]
+    @classmethod
+    def _parse_silences(cls, ffmpeg_stderr: str) -> list[tuple[float, float]]:
+        """
+        Pair silence_start/silence_end markers in the order they appear,
+        rather than trusting two separately-collected lists to line up.
 
-        ends = [
-            float(x)
-            for x in re.findall(
-                r"silence_end:\s*([0-9.]+)",
-                output,
-            )
-        ]
+        A clip that is still in silence when FFmpeg stops analyzing logs a
+        silence_start with no matching silence_end; that dangling start is
+        discarded rather than paired with the wrong end.
+        """
+        silences: list[tuple[float, float]] = []
+        pending_start: float | None = None
 
-        return list(zip(starts, ends))
+        for kind, value in cls._SILENCE_EVENT_RE.findall(ffmpeg_stderr):
+            if kind == "start":
+                pending_start = float(value)
+            elif kind == "end" and pending_start is not None:
+                silences.append((pending_start, float(value)))
+                pending_start = None
+
+        return silences
 
     def build_segments(
         self,

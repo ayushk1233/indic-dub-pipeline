@@ -1,0 +1,21 @@
+==============================================================================
+MEASURED SPEAKING RATES   FLEURS validation split
+==============================================================================
+
+   lang     n   median    mean     p25     p75   s/char  overhead
+     en   394   13.13   13.21  10.91   15.42   0.0643     1.66s
+     hi   239   10.81   10.75   9.33   12.12   0.0821     1.45s
+
+  median/mean/p25/p75 are characters per second over the whole clip.
+  s/char is the fitted articulation rate, overhead the fitted intercept.
+
+------------------------------------------------------------------------------
+DUB EXPANSION   same sentence, both languages, matched by id
+------------------------------------------------------------------------------
+
+       pair     n  duration     p25     p75    chars
+      en>hi   332    1.191x  0.949x  1.486x   0.989x
+
+  duration above 1.0 means the dub needs more time than the slot holds.
+
+==============================================================================

@@ -21,6 +21,12 @@ INDIC_LANG_TAGS = {
 }
 
 
+# How hard diverse beam search is pushed away from repeating token choices
+# across beam groups. Too low and the candidates are near-duplicates, which
+# defeats the point; too high and later groups drift into bad translations.
+DIVERSITY_PENALTY = 0.8
+
+
 class IndicTrans2Backend(TranslationBackend):
     """
     Concrete IndicTrans2 inference backend.
@@ -93,3 +99,67 @@ class IndicTrans2Backend(TranslationBackend):
         )[0]
 
         return translated_text
+
+    def translate_candidates(
+        self,
+        text: str,
+        source_language: str,
+        target_language: str,
+        num_candidates: int = 1,
+    ) -> list[str]:
+        """
+        Produce several genuinely different translations of one segment.
+
+        Plain beam search returns near-duplicates, which is useless when the
+        point is to find a shorter phrasing. Diverse beam search partitions the
+        beams into groups and penalises groups for repeating tokens that
+        earlier groups already chose, so the returned set actually spans
+        different ways of saying the same thing.
+
+        Results come back longest-confidence first, matching what `translate`
+        would return, and duplicates are removed while preserving that order.
+        """
+        if self.model is None or self.tokenizer is None:
+            raise RuntimeError("Model not loaded.")
+
+        if num_candidates <= 1:
+            return [self.translate(text, source_language, target_language)]
+
+        src_lang = INDIC_LANG_TAGS.get(source_language, source_language)
+        tgt_lang = INDIC_LANG_TAGS.get(target_language, target_language)
+
+        inputs = self.tokenizer(
+            f"{src_lang} {tgt_lang} {text}",
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=256,
+        ).to(self.model.device)
+
+        # Diverse beam search requires the beam count to divide evenly into
+        # groups, and one group per returned sequence gives maximum spread.
+        num_beams = max(num_candidates, 2)
+        num_groups = num_beams
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_length=256,
+                num_beams=num_beams,
+                num_beam_groups=num_groups,
+                diversity_penalty=DIVERSITY_PENALTY,
+                num_return_sequences=num_candidates,
+            )
+
+        decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+        unique: list[str] = []
+        seen: set[str] = set()
+
+        for candidate in decoded:
+            stripped = candidate.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                unique.append(stripped)
+
+        return unique or [self.translate(text, source_language, target_language)]
