@@ -116,18 +116,21 @@ Treat Colab as one transport, not as the architecture. `ExternalExecutionBackend
 import a result. `ColabTTSBackend.synthesize()` raises `NotImplementedError` on purpose, because
 execution happens elsewhere.
 
-The worker's result writing is still unimplemented, and `XTTSWorker.run()` calls `.get()` on
-`self.request`, which is a Pydantic model rather than a dict, so the end-to-end worker path does not
-run yet.
+`XTTSWorker.run()` writes `output/synthesis_result.json` after every segment, so a Colab timeout
+or one bad segment still leaves salvageable work on disk. A segment that raises is recorded with
+`status="failed"` rather than aborting the run. The loop itself has not yet been executed against a
+real GPU.
 
 ### XTTS configuration
 
 [colab/xtts.md](colab/xtts.md) records why the current XTTS settings were chosen. The short version:
 random output durations came from stochastic decoding, not from checkpoints or dependencies, and
 `do_sample=False` fixes it. Preferred conditioning is `gpt_cond_len=8`, `gpt_cond_chunk_len=4`,
-`max_ref_len=10`. Do not pass `temperature`, `top_k`, or `top_p` alongside `do_sample=False`. One
-caveat from the end of that document: greedy decoding degrades with short reference audio, and
-`synthesize_segment()` in the worker still passes `temperature=0.7` without setting `do_sample`.
+`max_ref_len=10`. Do not pass `temperature`, `top_k`, or `top_p` alongside `do_sample=False`. `synthesize_segment()`
+passes `INFERENCE_PARAMS` and no sampling parameters. One unresolved tension from the end of that
+document: it reports that greedy decoding degrades with short reference audio, while
+`CONDITIONING_PARAMS` caps `max_ref_len` at 10s and the runner picks the longest chunk, which for the
+test clip is 7.5s. Nobody has measured which effect wins.
 Read that document before changing any inference parameter.
 
 ## Conventions
