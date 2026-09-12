@@ -15,6 +15,13 @@
 # the repo's own pins.
 coqui-tts==0.27.5
 
+# coqui-tts declares transformers>=4.57 with no upper bound, and that is wrong.
+# TTS/tts/layers/tortoise/autoregressive.py imports isin_mps_friendly from
+# transformers.pytorch_utils, which exists in 4.57.x and was removed in 5.0.
+# Colab preinstalls transformers 5.x, which satisfies the fork's declaration,
+# so pip leaves it in place and `import TTS` then dies. Cap it ourselves.
+transformers>=4.57,<5
+
 soundfile
 librosa>=0.10.0
 einops
