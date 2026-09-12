@@ -22,6 +22,12 @@ CONDITIONING_PARAMS = {
     "gpt_cond_len": 8,
     "gpt_cond_chunk_len": 4,
     "max_ref_length": 10,
+    # The first real run cloned from a reference peaking at 0.21 and scored
+    # 0.478 mean speaker similarity against a 0.75 floor. The reference is now
+    # peak-normalized when it is built (src/stages/reference.py), but this
+    # covers a caller who supplies their own quiet clip. Defaults to False in
+    # coqui-tts 0.27; it belongs to get_conditioning_latents, not inference.
+    "sound_norm_refs": True,
 }
 
 # Decoder settings established in colab/xtts.md. Greedy decoding is what makes

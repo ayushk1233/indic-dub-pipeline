@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if should_run("export"):
             print("\n[export]")
-            result = run.add(runner.export_bundle(args.reference_audio))
+            result = run.add(runner.export_bundle(args.reference_audio, args.input))
             _echo(result)
 
         # Everything past here needs synthesized audio back from the GPU host.

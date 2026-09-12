@@ -13,12 +13,14 @@ once the first one is.
 """
 
 import json
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.orchestrator.models import StageResult, StageStatus
 from src.pipeline.paths import JobPaths
+from src.stages.reference import build_reference
 
 
 # Stage names, in execution order. `--from-stage` names one of these.
@@ -277,7 +279,11 @@ class PipelineRunner:
             selections,
         )
 
-    def export_bundle(self, reference_audio: Path | None = None) -> StageResult:
+    def export_bundle(
+        self,
+        reference_audio: Path | None = None,
+        source_media: str | Path | None = None,
+    ) -> StageResult:
         from src.stages.translation.models import TranslationResult
         from src.stages.tts.bundle.exporter import BundleExporter
         from src.stages.tts.processor import TTSProcessor
@@ -285,7 +291,10 @@ class PipelineRunner:
         with open(self.paths.translation, "r", encoding="utf-8") as f:
             translation = TranslationResult(**json.load(f))
 
-        reference = Path(reference_audio) if reference_audio else self._pick_reference()
+        if reference_audio:
+            reference = Path(reference_audio)
+        else:
+            reference = self._pick_reference(source_media)
 
         request = TTSProcessor().build_request(
             translation,
@@ -303,13 +312,25 @@ class PipelineRunner:
             reference_audio=str(reference),
         )
 
-    def _pick_reference(self) -> Path:
+    def _pick_reference(self, source_media: str | Path | None = None) -> Path:
         """
         Choose a voice reference from the speaker's own audio.
 
         The longest chunk is used, because the synthesis research in
         colab/xtts.md found that greedy decoding degrades with short reference
         audio, and the longest available clip is the safest default.
+
+        The chunks themselves are the wrong file to hand XTTS. They are cut at
+        the ASR sample rate, 16 kHz, and XTTS conditions at 22.05 kHz, so it
+        upsamples them and clones a voice with nothing above 8 kHz. That band
+        is where much of a speaker's identity lives. They are also at whatever
+        level the source happened to be. Measured on the first real run: a
+        16 kHz reference peaking at 0.21 produced a mean speaker similarity of
+        0.478 against a floor of 0.75.
+
+        So when the source media is available, re-cut the same span from it at
+        REFERENCE_SAMPLE_RATE and normalize the level. Falling back to the raw
+        chunk keeps the older callers working.
         """
         if self.paths.reference_audio.exists():
             return self.paths.reference_audio
@@ -322,7 +343,47 @@ class PipelineRunner:
                 f"{self.paths.chunks}. Run preprocessing first."
             )
 
-        return max(chunks, key=lambda p: p.stat().st_size)
+        chunk = max(chunks, key=lambda p: p.stat().st_size)
+
+        if source_media is None:
+            return chunk
+
+        span = self._span_of(chunk)
+
+        if span is None:
+            return chunk
+
+        try:
+            return build_reference(
+                source_media, span, self.paths.reference_audio
+            )
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            # A bad reference is recoverable; a failed export is not.
+            return chunk
+
+    def _span_of(self, chunk: Path) -> tuple[float, float] | None:
+        """
+        Find a chunk's start and end in the source, from the manifest.
+        """
+        if not self.paths.manifest.exists():
+            return None
+
+        try:
+            with open(self.paths.manifest, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        if not isinstance(entries, list):
+            return None
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if Path(str(entry.get("chunk_path", ""))).name == chunk.name:
+                return float(entry["start_ts"]), float(entry["end_ts"])
+
+        return None
 
     def import_bundle(self, bundle_path: Path | None = None):
         from src.stages.tts.bundle.importer import BundleImporter
