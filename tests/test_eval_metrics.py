@@ -360,3 +360,27 @@ def test_preprocess_metrics_from_manifest(tmp_path):
     assert metrics.num_short_segments == 1  # the 0.2s one
     assert metrics.gaps == [1.0, 1.0]
     assert metrics.num_missing_chunks == 3
+
+
+def test_a_bundle_manifest_is_not_mistaken_for_a_preprocess_manifest(tmp_path):
+    # Pointing the harness at a bundle directory is normal on the GPU side,
+    # where the preprocess manifest was never copied across. The bundle's own
+    # manifest.json is an object, not a list of segments, and must be skipped
+    # rather than parsed as one.
+    from src.eval.harness import build_report
+
+    bundle = tmp_path / "tts_bundle"
+    (bundle / "request").mkdir(parents=True)
+
+    with open(bundle / "manifest.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "metadata": {"bundle_version": "1.0", "job_id": "t"},
+                "paths": {"request_json": "request/synthesis_request.json"},
+            },
+            f,
+        )
+
+    report = build_report(job_dir=bundle, bundle_dir=bundle)
+
+    assert "preprocess" not in report["stages"]

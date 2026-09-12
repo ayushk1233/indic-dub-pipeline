@@ -27,6 +27,30 @@ def _serialize(value):
     return value
 
 
+def _is_preprocess_manifest(path: Path) -> bool:
+    """
+    Is this the preprocess chunk manifest, or some other manifest.json?
+
+    The harness is often pointed at a bundle directory, which carries its own
+    manifest.json describing the bundle version and paths. That file is a JSON
+    object, not the list of segment entries this stage reports on, and feeding
+    it to `evaluate_manifest` iterates the keys and fails on a string index.
+    Existence is not enough; check the shape.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    if not isinstance(entries, list):
+        return False
+
+    return not entries or all(
+        isinstance(e, dict) and "start_ts" in e and "end_ts" in e for e in entries
+    )
+
+
 def _translation_from_request(request: SynthesisRequest) -> TranslationResult:
     """
     Derive a translation result from a synthesis request.
@@ -72,7 +96,7 @@ def build_report(
     report: dict = {"job_dir": str(job_dir), "stages": {}}
 
     manifest_path = job_dir / "manifest.json"
-    if manifest_path.exists():
+    if manifest_path.exists() and _is_preprocess_manifest(manifest_path):
         report["stages"]["preprocess"] = _serialize(
             evaluate_manifest(manifest_path, total_duration=total_duration)
         )
