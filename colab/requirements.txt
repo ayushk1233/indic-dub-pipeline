@@ -1,13 +1,20 @@
-torch==2.5.1
-torchvision==0.20.1
-torchaudio==2.5.1
+# Colab-side dependencies. Deliberately different from the repo's
+# requirements.txt: this side only synthesizes, so it never loads IndicTrans2
+# and is not bound by that file's transformers<4.47 pin.
 
-transformers==4.39.3
-tokenizers==0.15.2
+# torch, torchaudio and torchvision are intentionally NOT pinned. Colab ships a
+# mutually consistent, CUDA-matched set, and replacing it costs several GB and
+# routinely leaves a torch that cannot see the GPU. The old pins here
+# (torch 2.5.1 / torchvision 0.20.1) no longer resolve at all, because Colab
+# has moved past the Python version those wheels were built for.
 
-TTS==0.22.0
+# TTS==0.22.0 is unusable now. It caps at Python <3.12, and Coqui is defunct so
+# it will never be updated. This is the maintained idiap fork: same `TTS`
+# import namespace, same XTTS-v2 checkpoint, tracks current torch. It requires
+# transformers>=4.57, which is exactly why this file must stay separate from
+# the repo's own pins.
+coqui-tts==0.27.5
 
-librosa>=0.10.0
 soundfile
+librosa>=0.10.0
 einops
-coqpit

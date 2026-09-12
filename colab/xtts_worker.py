@@ -1,4 +1,5 @@
 import json
+import os
 import time
 import traceback
 from pathlib import Path
@@ -90,6 +91,11 @@ class XTTSWorker:
         diagnostics = PreflightValidator().run()
         print("Preflight diagnostics:", diagnostics)
 
+        # XTTS-v2's weights are under Coqui's CPML, which the loader will not
+        # download without agreement. Colab has no tty to prompt on, so the
+        # agreement is recorded here: this run is research use, non-commercial.
+        os.environ.setdefault("COQUI_TOS_AGREED", "1")
+
         from TTS.api import TTS
 
         print("Loading XTTS-v2...")
@@ -156,8 +162,9 @@ class XTTSWorker:
         """
         Synthesize a single segment and return its typed result.
         """
+        import numpy as np
+        import soundfile as sf
         import torch
-        import torchaudio
 
         self.compute_speaker_embedding()
 
@@ -179,8 +186,8 @@ class XTTSWorker:
                 **INFERENCE_PARAMS,
             )
 
-        wav = torch.tensor(out["wav"]).unsqueeze(0)
-        num_samples = wav.shape[-1]
+        wav = np.asarray(out["wav"], dtype=np.float32)
+        num_samples = int(wav.shape[-1])
         duration = num_samples / sample_rate
 
         gpt_latents = out.get("gpt_latents")
@@ -189,7 +196,10 @@ class XTTSWorker:
         # segment_id is globally unique; chunk_id is shared by every segment
         # cut from the same source chunk and would overwrite siblings.
         output_path = self.output_dir / f"seg_{segment.segment_id:05d}.wav"
-        torchaudio.save(str(output_path), wav, sample_rate)
+        # PCM_16 is not a default worth trusting to chance. The local side reads
+        # these files with the stdlib `wave` module, which handles integer PCM
+        # only; a 32-bit float wav is read back as int32 and decodes to noise.
+        sf.write(str(output_path), wav, sample_rate, subtype="PCM_16")
 
         similarity = self._speaker_similarity(output_path)
 
