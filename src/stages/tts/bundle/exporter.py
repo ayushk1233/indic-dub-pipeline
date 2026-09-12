@@ -24,6 +24,16 @@ class BundleExporter:
         output_sub_dir = output_dir / "output"
         logs_dir = output_dir / "logs"
 
+        # Clear any previous run's output before re-exporting. Two reasons,
+        # both of which have bitten this project: `package_bundle` zips
+        # everything under the bundle root, so leftover audio rides along to
+        # the GPU host; and a segment that fails there leaves the stale file
+        # in place, where the importer accepts it as a real result. A bundle
+        # must describe exactly one synthesis attempt.
+        for stale_dir in (output_sub_dir, logs_dir):
+            if stale_dir.exists():
+                shutil.rmtree(stale_dir)
+
         request_dir.mkdir(parents=True, exist_ok=True)
         output_sub_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)

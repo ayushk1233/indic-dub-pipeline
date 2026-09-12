@@ -277,3 +277,37 @@ def test_a_result_segment_nobody_asked_for_is_flagged(tmp_path):
     unexpected = imported.issues_of("unexpected")
     assert [i.segment_id for i in unexpected] == [7]
     assert 7 not in imported.usable_ids
+
+
+def test_re_exporting_clears_a_previous_runs_output(tmp_path):
+    # A bundle describes one synthesis attempt. Re-exporting over a bundle
+    # that already holds results must not leave them behind: `package_bundle`
+    # would ship them to the GPU host, and any segment that fails there would
+    # be silently satisfied by the stale file.
+    bundle = tmp_path / "tts_bundle"
+    reference = tmp_path / "reference.wav"
+    write_wav(reference, 1.0)
+
+    BundleExporter().export(make_request(), reference, bundle)
+
+    stale_audio = bundle / "output" / "seg_00000.wav"
+    stale_result = bundle / "output" / "synthesis_result.json"
+    stale_log = bundle / "logs" / "worker.log"
+    write_wav(stale_audio, 1.0)
+    stale_result.write_text("{}", encoding="utf-8")
+    stale_log.write_text("old run", encoding="utf-8")
+
+    BundleExporter().export(make_request(), reference, bundle)
+
+    assert not stale_audio.exists()
+    assert not stale_result.exists()
+    assert not stale_log.exists()
+
+    # The directories themselves survive, since the worker writes into them.
+    assert (bundle / "output").is_dir()
+    assert (bundle / "logs").is_dir()
+
+    archive = BundleExporter().package_bundle(bundle)
+
+    with zipfile.ZipFile(archive) as zf:
+        assert not [name for name in zf.namelist() if name.startswith("output/")]
