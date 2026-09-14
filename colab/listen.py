@@ -15,7 +15,13 @@ from IPython.display import Audio, HTML, display
 BUNDLE = Path("/content/tts_bundle")
 OUT_ROOT = Path("/content/experiments")
 
-CONFIG_ORDER = ["greedy", "sampled", "sampled_fast", "sampled_split", "greedy_fast"]
+# Set to "/content/model_comparison" to play that sweep instead.
+OUT_ROOT_OVERRIDE = None
+
+CONFIG_ORDER = [
+    "greedy", "sampled", "sampled_fast", "sampled_split", "greedy_fast",
+    "xtts_short_cond", "xtts_long_cond", "indicf5",
+]
 
 NOTES = {
     "greedy": "what the pipeline ships today",
@@ -23,6 +29,9 @@ NOTES = {
     "sampled_fast": "sampling plus speed=1.2",
     "sampled_split": "sampling plus sentence splitting",
     "greedy_fast": "greedy plus speed=1.2, isolates rate control",
+    "xtts_short_cond": "XTTS, reference capped at 10s (what ships today)",
+    "xtts_long_cond": "XTTS, full 21s reference",
+    "indicf5": "IndicF5, trained on Indian languages",
 }
 
 
@@ -36,6 +45,10 @@ def heading(text, size=18):
 
 
 def main():
+    global OUT_ROOT
+    if OUT_ROOT_OVERRIDE:
+        OUT_ROOT = Path(OUT_ROOT_OVERRIDE)
+
     request = json.loads((BUNDLE / "request" / "synthesis_request.json").read_text())
 
     heading("Reference — the voice being cloned")
@@ -53,6 +66,8 @@ def main():
 
         for name in CONFIG_ORDER:
             path = OUT_ROOT / name / f"seg_{sid:05d}.wav"
+            if not path.exists():
+                path = Path("/content/model_comparison") / name / f"seg_{sid:05d}.wav"
             if not path.exists():
                 continue
             d = duration_of(path)

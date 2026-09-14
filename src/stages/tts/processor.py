@@ -10,6 +10,7 @@ class TTSProcessor:
         self,
         translation_result: TranslationResult,
         reference_audio: str,
+        reference_text: str | None = None,
     ) -> SynthesisRequest:
         segments = []
         for segment in translation_result.segments:
@@ -27,6 +28,7 @@ class TTSProcessor:
         return SynthesisRequest(
             job_id=translation_result.job_id,
             language=translation_result.target_language,
+            reference_text=reference_text,
             segments=segments,
         )
 

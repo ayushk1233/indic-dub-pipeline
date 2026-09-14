@@ -20,7 +20,7 @@ from pathlib import Path
 
 from src.orchestrator.models import StageResult, StageStatus
 from src.pipeline.paths import JobPaths
-from src.stages.reference import build_reference
+from src.stages.reference import TARGET_REFERENCE_S, build_reference
 
 
 # Stage names, in execution order. `--from-stage` names one of these.
@@ -292,13 +292,14 @@ class PipelineRunner:
             translation = TranslationResult(**json.load(f))
 
         if reference_audio:
-            reference = Path(reference_audio)
+            reference, reference_text = Path(reference_audio), None
         else:
-            reference = self._pick_reference(source_media)
+            reference, reference_text = self._build_reference(source_media)
 
         request = TTSProcessor().build_request(
             translation,
             reference_audio="request/reference.wav",
+            reference_text=reference_text,
         )
 
         exporter = BundleExporter()
@@ -311,6 +312,111 @@ class PipelineRunner:
             num_segments=len(request.segments),
             reference_audio=str(reference),
         )
+
+    def _build_reference(
+        self, source_media: str | Path | None
+    ) -> tuple[Path, str | None]:
+        """
+        Build the reference clip and its transcript.
+
+        Returns the transcript alongside the audio because IndicF5 conditions
+        on both and cannot clone from audio alone. XTTS ignores it.
+        """
+        if self.paths.reference_audio.exists():
+            return self.paths.reference_audio, self._transcript_for(None)
+
+        spans = self._reference_spans()
+
+        if source_media is None or not spans:
+            return self._pick_reference(source_media), None
+
+        try:
+            path = build_reference(
+                source_media, spans, self.paths.reference_audio
+            )
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            # A worse reference is recoverable; a failed export is not.
+            return self._pick_reference(source_media), None
+
+        return path, self._transcript_for(spans)
+
+    def _reference_spans(self) -> list[tuple[float, float]]:
+        """
+        Choose which stretches of the source become the reference.
+
+        Longest first, because long uninterrupted speech conditions better
+        than the same seconds chopped up, then replayed in time order so the
+        clip sounds like continuous speech rather than a shuffle.
+        """
+        entries = self._manifest_entries()
+
+        if not entries:
+            return []
+
+        spans = sorted(
+            ((float(e["start_ts"]), float(e["end_ts"])) for e in entries),
+            key=lambda span: span[1] - span[0],
+            reverse=True,
+        )
+
+        chosen: list[tuple[float, float]] = []
+        total = 0.0
+
+        for span in spans:
+            if total >= TARGET_REFERENCE_S:
+                break
+            chosen.append(span)
+            total += span[1] - span[0]
+
+        return sorted(chosen)
+
+    def _manifest_entries(self) -> list[dict]:
+        if not self.paths.manifest.exists():
+            return []
+
+        try:
+            with open(self.paths.manifest, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return []
+
+        if not isinstance(entries, list):
+            return []
+
+        return [e for e in entries if isinstance(e, dict) and "start_ts" in e]
+
+    def _transcript_for(self, spans: list[tuple[float, float]] | None) -> str | None:
+        """
+        The source-language text spoken during `spans`, or all of it when
+        `spans` is None.
+        """
+        if not self.paths.transcript.exists():
+            return None
+
+        try:
+            with open(self.paths.transcript, "r", encoding="utf-8") as f:
+                transcript = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+        parts = []
+
+        for segment in transcript.get("segments", []):
+            start = float(segment.get("start_ts", 0.0))
+            end = float(segment.get("end_ts", 0.0))
+
+            if spans is not None and not any(
+                start < span_end and end > span_start
+                for span_start, span_end in spans
+            ):
+                continue
+
+            text = (segment.get("text") or "").strip()
+
+            if text:
+                parts.append(text)
+
+        return " ".join(parts) or None
 
     def _pick_reference(self, source_media: str | Path | None = None) -> Path:
         """

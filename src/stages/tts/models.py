@@ -28,6 +28,12 @@ class SynthesisRequest(BaseModel):
 
     output_sample_rate: int = 24000
 
+    # Transcript of request/reference.wav, in the source language. XTTS does
+    # not need it; IndicF5 conditions on reference audio and its transcript
+    # together and cannot clone without it. Optional so that bundle 1.0
+    # requests still parse.
+    reference_text: str | None = None
+
     segments: list[SynthesisSegment] = Field(default_factory=list)
 
 

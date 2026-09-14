@@ -55,7 +55,9 @@ class BundleExporter:
         # Build and write manifest
         manifest = BundleManifest(
             metadata=BundleMetadata(
-                bundle_version="1.0",
+                # 1.1 adds SynthesisRequest.reference_text. Readers of 1.0
+                # ignore the extra field, so this stays backward compatible.
+                bundle_version="1.1",
                 job_id=request.job_id,
                 created_at=datetime.utcnow().isoformat() + "Z",
             ),
