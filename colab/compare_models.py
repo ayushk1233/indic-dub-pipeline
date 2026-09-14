@@ -61,6 +61,36 @@ CONDITIONING = {
 }
 
 
+def anchor_embedding(worker, reference):
+    """
+    One fixed yardstick for every row in this comparison.
+
+    Scoring each configuration against the embedding it produced for itself
+    measures self-consistency, which rises as conditioning narrows. That would
+    have made the 10-second cap look like the winner by construction.
+    """
+    _, embedding = worker.xtts.get_conditioning_latents(
+        audio_path=[str(reference)],
+        gpt_cond_len=60,
+        gpt_cond_chunk_len=30,
+        max_ref_length=60,
+        sound_norm_refs=True,
+    )
+    return embedding
+
+
+def score(worker, path, anchor):
+    try:
+        _, produced = worker.xtts.get_conditioning_latents(audio_path=[str(path)])
+    except Exception:
+        return None
+
+    a = anchor.reshape(1, -1).float()
+    b = produced.reshape(1, -1).float().to(a.device)
+
+    return float(torch.nn.functional.cosine_similarity(a, b).item())
+
+
 def summarize(name, rows):
     sims = [r["sim"] for r in rows if r.get("sim") is not None]
     print(
@@ -72,7 +102,7 @@ def summarize(name, rows):
     )
 
 
-def run_xtts(worker, segments, rate, results):
+def run_xtts(worker, segments, rate, results, anchor):
     for name, conditioning in CONDITIONING.items():
         out_dir = OUT_ROOT / name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -113,7 +143,7 @@ def run_xtts(worker, segments, rate, results):
                 "dur": duration,
                 "ratio": duration / slot if slot else 0.0,
                 "cps": len(segment.text) / duration if duration else 0.0,
-                "sim": worker._speaker_similarity(path),
+                "sim": score(worker, path, anchor),
                 "gen_s": time.perf_counter() - started,
             })
             print(f"    seg {segment.segment_id}  {duration:6.2f}s  "
@@ -122,7 +152,7 @@ def run_xtts(worker, segments, rate, results):
         results[name] = rows
 
 
-def run_indicf5(worker, segments, rate, results):
+def run_indicf5(worker, segments, rate, results, anchor):
     print("\n--- indicf5")
 
     request = worker.request
@@ -180,7 +210,7 @@ def run_indicf5(worker, segments, rate, results):
             "cps": len(segment.text) / duration if duration else 0.0,
             # XTTS's speaker encoder, used on non-XTTS audio. Comparable
             # between these rows; not an absolute score.
-            "sim": worker._speaker_similarity(path),
+            "sim": score(worker, path, anchor),
             "gen_s": time.perf_counter() - started,
         })
         print(f"    seg {segment.segment_id}  {duration:6.2f}s  "
@@ -203,9 +233,11 @@ def main():
     print(f"\nreference {info.duration:.2f}s at {info.samplerate} Hz, "
           f"{len(segments)} segments")
 
+    anchor = anchor_embedding(worker, ref)
+
     results = {}
-    run_xtts(worker, segments, rate, results)
-    run_indicf5(worker, segments, rate, results)
+    run_xtts(worker, segments, rate, results, anchor)
+    run_indicf5(worker, segments, rate, results, anchor)
 
     print("\n" + "=" * 70)
     print("SUMMARY")

@@ -34,6 +34,10 @@ NOTES = {
     "indicf5": "IndicF5, trained on Indian languages",
 }
 
+# Conditioning sweep directories are discovered rather than listed, since their
+# names encode the parameters.
+import itertools  # noqa: E402
+
 
 def duration_of(path):
     with wave.open(str(path), "rb") as h:
@@ -64,10 +68,21 @@ def main():
             f"{segment['text']}</div>"
         ))
 
-        for name in CONFIG_ORDER:
+        swept = sorted(
+            d.name for d in Path("/content/conditioning").glob("*")
+            if d.is_dir() and (d / f"seg_{sid:05d}.wav").exists()
+        ) if Path("/content/conditioning").exists() else []
+
+        for name in itertools.chain(CONFIG_ORDER, swept):
+            if name in CONFIG_ORDER and name in swept:
+                continue
             path = OUT_ROOT / name / f"seg_{sid:05d}.wav"
             if not path.exists():
-                path = Path("/content/model_comparison") / name / f"seg_{sid:05d}.wav"
+                for alt in ("/content/model_comparison", "/content/conditioning"):
+                    candidate = Path(alt) / name / f"seg_{sid:05d}.wav"
+                    if candidate.exists():
+                        path = candidate
+                        break
             if not path.exists():
                 continue
             d = duration_of(path)
@@ -75,7 +90,7 @@ def main():
                 f"<div style='margin-top:8px'><b>{name}</b> "
                 f"<span style='color:#666'>&mdash; {d:.2f}s, "
                 f"{d / slot:.2f}x slot, {len(segment['text']) / d:.1f} cps "
-                f"&mdash; {NOTES[name]}</span></div>"
+                f"&mdash; {NOTES.get(name, 'conditioning sweep')}</span></div>"
             ))
             display(Audio(filename=str(path)))
 
