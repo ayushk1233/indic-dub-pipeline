@@ -698,3 +698,42 @@
   - The restart note pointed at cell numbers ("continue from cell 4", "do not re-run cell 2")
     that did not match the cells it meant, and would not survive the notebook being rebuilt
     by hand in a fresh Colab. It names sections instead now.
+
+## Step 68 — Phase 4 (voice diagnosis) — the four-arm result
+
+- Completed: ran `colab/voice_experiment.ipynb` on a T4 against the new recording session.
+  Calibration on the clean takes: floor 0.095 (58 real strangers), same-language ceiling 0.968,
+  and — measured here for the first time — a cross-language ceiling of 0.896, the speaker's own
+  Hindi scored against his own English anchor with no synthesis involved.
+
+  | arm | greedy | sampled | position |
+  |---|---|---|---|
+  | `en -> en` | 0.502 | 0.486 | 47% |
+  | `hi -> hi` | 0.719 | 0.689 | 72% |
+  | `en -> hi` | 0.713 | 0.718 | **78%** (cross-language scale) |
+  | `hi -> en` | 0.553 | 0.532 | 53% |
+
+- Verification: PASSED. Placed on the same same-language scale as step 66, the production path
+  `en -> hi` moved from 48% to 71% purely by re-recording the reference, while `en -> en` moved
+  from 42% to 47%. The arm-to-arm gap of 0.22 is three to ten times the within-arm spread
+  (0.021 to 0.077 across three sentences), so it is a real effect and not the kind of
+  sub-noise difference the step-64 sweep mistook for a result.
+- Deviations:
+  - The cross-lingual hypothesis is dead. Holding the spoken language fixed and swapping the
+    reference language changes similarity by -0.011 (speaking Hindi) and +0.048 (speaking
+    English) — both inside the within-arm spread, and the second one favours the *foreign*
+    reference. An English reference clones into Hindi as well as a Hindi reference does.
+    Voice conversion was the planned fix for a cross-lingual gap; there is no gap to fix, so
+    that work is dropped rather than deferred.
+  - What predicts the score is the language being *spoken*, not the language being cloned
+    from. Speaking English scores ~0.52 from either reference; speaking Hindi scores ~0.71
+    from either. XTTS-v2's English decoder overwrites speaker identity, which is the same
+    mechanism as the American accent reported in step 66, measured a second way.
+  - Synthesis runs 1.20x to 1.23x faster than the FLEURS rates the duration model is fitted
+    on, consistently across every arm. The speaker himself is only 1.07x to 1.13x fast, so
+    this is the synthesizer, not the reference. `src/eval/duration_model.py` therefore
+    predicts slot durations about 20% longer than XTTS actually delivers, which biases
+    length control toward translations shorter than they need to be. Not yet fixed; the
+    model should be recalibrated against synthesized audio, since XTTS is what fills the slot.
+  - Greedy decoding beat sampling on three of four arms and tied on the fourth, agreeing with
+    the determinism finding in `colab/xtts.md` for an unrelated reason.
