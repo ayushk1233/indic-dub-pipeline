@@ -81,6 +81,11 @@ SEED = 0
 
 NATURAL_CPS_HI = 10.81
 
+# How many pieces to cut each real take into when measuring the ceiling.
+# A 50 to 60 second take gives roughly 18s, 10s, 6s and 4s pieces, which
+# brackets both the test sentences and real dubbing segments.
+SPLITS = (3, 6, 10, 14)
+
 _SENTENCE_RE = re.compile(r"(?<=[.!?।])\s+")
 
 LINES: list[str] = []
@@ -104,24 +109,53 @@ def sentences(text, minimum=25):
 
 def load_indicf5():
     """
-    Load IndicF5 through transformers' remote-code path.
+    Load IndicF5 through transformers' remote-code path, with real weights.
 
-    Kept in its own function so the import failure, which is the likely one on
-    a runtime that has not installed it, is reported as itself rather than as
-    a mysterious failure halfway through a synthesis loop.
+    transformers builds a model on the meta device by default now and fills it
+    afterwards. IndicF5's remote code constructs its Vocos vocoder inside its
+    own __init__, and that submodule inherits the meta context but not the
+    fill, so every parameter loads as a no-op:
+
+        UserWarning: for backbone.embed.weight: copying from a non-meta
+        parameter in the checkpoint to a meta parameter in the current model,
+        which is a no-op.
+
+    `low_cpu_mem_usage=False` turns that initialization off and allocates real
+    storage. The check afterwards is the important half: a meta-weighted model
+    does not raise on its own, it synthesizes noise, and noise scored against a
+    speaker anchor looks exactly like a model that clones badly. That failure
+    would have been reported as a result rather than as a bug, so it is made
+    loud here instead.
     """
     from transformers import AutoModel
 
-    model = AutoModel.from_pretrained(INDICF5_REPO, trust_remote_code=True)
+    errors = []
+    model = None
 
-    # The model card never moves it to a device, so the remote code may place
-    # its own submodules and expose nothing to move. Try, and carry on if the
-    # object does not support it rather than failing the whole comparison.
-    try:
-        model = model.to("cuda" if torch.cuda.is_available() else "cpu")
-    except (AttributeError, NotImplementedError, RuntimeError) as exc:
-        p(f"  note: could not move IndicF5 to the GPU ({type(exc).__name__}); "
-          f"using it as loaded")
+    for kwargs in ({"low_cpu_mem_usage": False}, {}):
+        try:
+            model = AutoModel.from_pretrained(
+                INDICF5_REPO, trust_remote_code=True, **kwargs
+            )
+            break
+        except TypeError as exc:
+            errors.append(f"{kwargs}: {exc}")
+
+    if model is None:
+        raise RuntimeError("; ".join(errors))
+
+    meta = [name for name, tensor in model.named_parameters() if tensor.is_meta]
+    meta += [name for name, tensor in model.named_buffers() if tensor.is_meta]
+
+    if meta:
+        raise RuntimeError(
+            f"{len(meta)} parameters are still on the meta device "
+            f"(first: {meta[0]}). The weights were never materialized, so this "
+            f"model would synthesize noise rather than speech."
+        )
+
+    if torch.cuda.is_available():
+        model = model.to("cuda")
 
     return model
 
@@ -187,26 +221,57 @@ def main():
     _, anchor_en = latents(FIXTURES / "english_speech.wav", **ANCHOR)
     _, anchor_hi = latents(FIXTURES / "hindi_speech.wav", **ANCHOR)
 
-    section("CALIBRATION — same rig as the four-arm run")
+    section("CALIBRATION — a ceiling per clip length, not one ceiling")
 
-    def thirds(path, label, anchor):
+    def pieces(path, count, label, anchor):
+        """
+        Cut a real take into `count` equal pieces and score each against the
+        anchor. No synthesis: this is the speaker against himself.
+        """
         audio, rate = sf.read(str(path), dtype="float32", always_2d=False)
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
-        edges = np.linspace(0, audio.size, 4).astype(int)
-        scores = []
-        for index in range(3):
-            piece = OUT / f"{label}_{index}.wav"
-            sf.write(str(piece), audio[edges[index]:edges[index + 1]], rate, subtype="PCM_16")
+
+        edges = np.linspace(0, audio.size, count + 1).astype(int)
+        scores, durations = [], []
+
+        for index in range(count):
+            piece = OUT / f"{label}_{count}_{index}.wav"
+            sf.write(str(piece), audio[edges[index]:edges[index + 1]], rate,
+                     subtype="PCM_16")
             embedding = embed(piece)
             if embedding is not None:
                 scores.append(cosine(anchor, embedding))
-        return scores
+                durations.append((edges[index + 1] - edges[index]) / rate)
 
-    same = thirds(FIXTURES / "english_speech.wav", "en_third", anchor_en)
-    cross = [cosine(anchor_en, anchor_hi)] + thirds(
-        FIXTURES / "hindi_speech.wav", "hi_third", anchor_en
-    )
+        if not scores:
+            return None
+
+        return float(np.mean(durations)), float(np.mean(scores))
+
+    def curve(path, label, anchor):
+        """
+        The ceiling as a function of how much audio is being judged.
+
+        A speaker embedding taken from five seconds is a noisier estimate than
+        one taken from twenty, and it regresses toward the population mean, so
+        a short clip scores lower against the same anchor even when it is the
+        same person on the same tape. Measured across all 14 XTTS clips in the
+        previous run, clip duration correlated with similarity at r = +0.82,
+        and the short clips scored 0.11 below the long ones.
+
+        That matters because real dubbing segments are short. The four-arm run
+        used the three longest sentences and scored them against a ceiling
+        built from 17-second thirds, which flattered the result: the same model
+        on production-length segments sits well below it. One ceiling per
+        length bucket fixes the mismatch.
+        """
+        points = [p for p in (pieces(path, n, label, anchor) for n in SPLITS)
+                  if p is not None]
+        return sorted(points)
+
+    same_curve = curve(FIXTURES / "english_speech.wav", "en_piece", anchor_en)
+    cross_curve = curve(FIXTURES / "hindi_speech.wav", "hi_piece", anchor_en)
 
     floor_scores = []
     try:
@@ -216,28 +281,41 @@ def main():
         p(f"  floor unavailable: {type(exc).__name__}: {exc}")
 
     floor = float(np.median(floor_scores)) if floor_scores else 0.0
-    ceiling_same = float(np.mean(same)) if same else float("nan")
-    ceiling_cross = float(np.mean(cross)) if cross else float("nan")
 
-    p(f"  floor                   {floor:.3f}   ({len(floor_scores)} real strangers)")
-    p(f"  same-language ceiling   {ceiling_same:.3f}")
-    p(f"  cross-language ceiling  {ceiling_cross:.3f}   (you in Hindi vs your English anchor)")
+    p(f"  floor  {floor:.3f}   ({len(floor_scores)} real strangers)")
+    p("")
+    p(f"  {'clip length':>13}{'same-language':>16}{'cross-language':>16}")
+    for (d_same, c_same), (d_cross, c_cross) in zip(same_curve, cross_curve):
+        p(f"  {d_same:>11.1f}s{c_same:>16.3f}{c_cross:>16.3f}")
+    p("")
+    p("  You against yourself, no synthesis. Shorter clips score lower because")
+    p("  the embedding is a noisier estimate, not because the voice changed.")
 
-    def position(score, ceiling):
+    def ceiling_for(duration, points):
+        """Ceiling measured at whichever clip length is closest to this one."""
+        if not points:
+            return float("nan")
+        return min(points, key=lambda point: abs(point[0] - duration))[1]
+
+    def position(score, duration, points):
+        ceiling = ceiling_for(duration, points)
         span = ceiling - floor
         if not np.isfinite(score) or not np.isfinite(span) or span <= 0:
             return float("nan")
         return 100.0 * (score - floor) / span
 
     # --------------------------------------------------------------- the arms
+    # The English reference speaking Hindi is scored against the cross-language
+    # curve; the Hindi reference against the same-language one. Each clip is
+    # then placed against the point on that curve nearest its own duration.
     arms = [
-        ("en_ref", "english_reference.wav", "english", anchor_en, ceiling_cross),
-        ("hi_ref", "hindi_reference.wav", "hindi", anchor_hi, ceiling_same),
+        ("en_ref", "english_reference.wav", "english", anchor_en, cross_curve),
+        ("hi_ref", "hindi_reference.wav", "hindi", anchor_hi, same_curve),
     ]
 
     rows = []
 
-    def record(model, arm, index, sentence, wav, anchor, ceiling, elapsed):
+    def record(model, arm, index, sentence, wav, anchor, points, elapsed):
         directory = OUT / model / arm
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{index:02d}.wav"
@@ -249,16 +327,20 @@ def main():
 
         rows.append({
             "model": model, "arm": arm, "index": index, "text": sentence,
-            "path": path, "dur": duration, "sim": score, "ceiling": ceiling,
+            "path": path, "dur": duration, "sim": score,
+            "ceiling": ceiling_for(duration, points),
+            "position": position(score, duration, points),
+            "peak": float(np.abs(wav).max()) if wav.size else 0.0,
             "cps": len(sentence) / duration if duration else 0.0,
             "gen_s": elapsed,
         })
         p(f"    [{index}] {duration:6.2f}s  {rows[-1]['cps']:5.1f} cps  "
-          f"sim {score:.3f}  {position(score, ceiling):4.0f}% of scale")
+          f"sim {score:.3f}  vs {rows[-1]['ceiling']:.3f}  "
+          f"{rows[-1]['position']:4.0f}% of scale")
 
     section("XTTS-v2   (CPML, non-commercial — the baseline, not a candidate)")
 
-    for arm, filename, _, anchor, ceiling in arms:
+    for arm, filename, _, anchor, points in arms:
         latent, embedding = latents(FIXTURES / filename, **CONDITIONING)
         p(f"\n--- xtts {arm} -> hi")
 
@@ -277,7 +359,7 @@ def main():
 
             record("xtts", arm, index, sentence,
                    np.asarray(result["wav"], dtype=np.float32),
-                   anchor, ceiling, time.perf_counter() - started)
+                   anchor, points, time.perf_counter() - started)
 
     section("IndicF5   (MIT — the one that could actually ship)")
 
@@ -289,7 +371,7 @@ def main():
         indicf5 = None
 
     if indicf5 is not None:
-        for arm, filename, key, anchor, ceiling in arms:
+        for arm, filename, key, anchor, points in arms:
             transcript = ref_text[key]["text"]
             p(f"\n--- indicf5 {arm} -> hi")
             p(f"    conditioned on {len(transcript)} chars of {key} transcript")
@@ -308,35 +390,71 @@ def main():
                     continue
 
                 record("indicf5", arm, index, sentence, as_float_wave(audio),
-                       anchor, ceiling, time.perf_counter() - started)
+                       anchor, points, time.perf_counter() - started)
 
     # ------------------------------------------------------------------ result
     section("RESULT")
-    p(f"{'model':<10}{'arm':<9}{'n':>3}{'sim':>8}{'se':>7}{'ceiling':>9}"
-      f"{'position':>10}{'cps':>7}{'natural':>9}{'gen':>7}")
+    p(f"{'model':<10}{'arm':<9}{'n':>3}{'sim':>8}{'se':>7}{'position':>10}"
+      f"{'se':>6}{'cps':>7}{'natural':>9}{'gen':>7}")
+    p("  Position is per clip against the ceiling for that clip's own length,")
+    p("  then averaged — not the mean score placed on one ceiling.")
+    p("")
 
     table = {}
     for model in ("xtts", "indicf5"):
-        for arm, _, _, _, ceiling in arms:
+        for arm, _, _, _, _ in arms:
             items = [r for r in rows if r["model"] == model and r["arm"] == arm]
             scores = [r["sim"] for r in items if np.isfinite(r["sim"])]
+            places = [r["position"] for r in items if np.isfinite(r["position"])]
             if not scores:
                 continue
-            mean = float(np.mean(scores))
-            se = float(np.std(scores, ddof=1) / np.sqrt(len(scores))) if len(scores) > 1 else float("nan")
+
+            def mean_se(values):
+                mean = float(np.mean(values))
+                if len(values) < 2:
+                    return mean, float("nan")
+                return mean, float(np.std(values, ddof=1) / np.sqrt(len(values)))
+
+            mean, se = mean_se(scores)
+            place, place_se = mean_se(places) if places else (float("nan"),) * 2
             cps = float(np.mean([r["cps"] for r in items]))
             gen = float(np.mean([r["gen_s"] for r in items]))
-            table[(model, arm)] = (mean, se, position(mean, ceiling))
+            table[(model, arm)] = (mean, se, place, place_se)
             p(f"{model:<10}{arm:<9}{len(scores):>3}{mean:>8.3f}{se:>7.3f}"
-              f"{ceiling:>9.3f}{position(mean, ceiling):>9.0f}%"
+              f"{place:>9.0f}%{place_se:>6.0f}"
               f"{cps:>7.1f}{cps / NATURAL_CPS_HI:>8.2f}x{gen:>7.1f}s")
+
+    section("LENGTH — does either model hold up on short segments?")
+    p("  Real dubbing segments are short. The 14-segment bundle from english.mov")
+    p("  averages under 5 seconds, which is the bucket where the embedding is")
+    p("  least reliable and, on the previous run, where XTTS lost the most.")
+    p("")
+    p(f"  {'model':<10}{'bucket':<10}{'n':>3}{'sim':>8}{'ceiling':>9}{'position':>10}")
+
+    for model in ("xtts", "indicf5"):
+        for label, keep in (("< 8s", lambda d: d < 8.0), (">= 8s", lambda d: d >= 8.0)):
+            items = [r for r in rows
+                     if r["model"] == model and keep(r["dur"])
+                     and np.isfinite(r["sim"])]
+            if not items:
+                continue
+            p(f"  {model:<10}{label:<10}{len(items):>3}"
+              f"{np.mean([r['sim'] for r in items]):>8.3f}"
+              f"{np.mean([r['ceiling'] for r in items]):>9.3f}"
+              f"{np.mean([r['position'] for r in items]):>9.0f}%")
+
+    quiet = [r for r in rows if r["peak"] < 0.01]
+    if quiet:
+        p("")
+        p(f"  !! {len(quiet)} clips peaked below 0.01 — near silence. Check the")
+        p(f"     audio before trusting any score from that model.")
 
     section("VERDICT")
 
     production = [table.get(("xtts", "en_ref")), table.get(("indicf5", "en_ref"))]
 
     if all(production):
-        (x_mean, x_se, x_pos), (i_mean, i_se, i_pos) = production
+        (x_mean, x_se, x_pos, _), (i_mean, i_se, i_pos, _) = production
         gap = i_mean - x_mean
         noise = float(np.hypot(x_se, i_se))
 

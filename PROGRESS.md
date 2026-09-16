@@ -821,3 +821,38 @@
   - If IndicF5 does fail on numpy 2.2, the fallback is separate kernels rather than a
     resolvable environment: `/content` survives a restart, so each model can synthesize in an
     environment built for it and a final pass on the XTTS stack can score both sets together.
+
+## Step 72 — Phase 4 (model choice) — meta tensors, and a ceiling per clip length
+
+- Completed:
+  - `load_indicf5()` passes `low_cpu_mem_usage=False` and then asserts that no parameter or
+    buffer is left on the meta device.
+  - Replaced the single-point calibration in `colab/indicf5_check.py` with a ceiling measured
+    at four clip lengths, and placed every clip against the point nearest its own duration.
+    Added a LENGTH section reporting each model above and below 8 seconds, and a guard that
+    flags clips peaking below 0.01.
+- Verification: PASSED. The placement logic was exercised against a synthetic falling ceiling:
+  nearest-bucket selection picks correctly at 4.0s, 6.0s, 13.6s and 60s, and a clip scoring
+  0.799 at 13.6s places at 84% while one scoring 0.557 at 4.87s places at 60%.
+- Deviations:
+  - IndicF5 loaded every weight into a meta tensor. transformers now builds models on the meta
+    device and fills them afterwards; IndicF5's remote code constructs its Vocos vocoder inside
+    its own `__init__`, which inherits the meta context but not the fill, so each parameter
+    copied as a no-op and torch said so eighty times. The run only failed because the code
+    called `.to("cuda")` afterwards. Without that call the model would have loaded cleanly and
+    synthesized noise, and noise scored against a speaker anchor is indistinguishable from a
+    model that clones badly — it would have been written down as a result. The explicit meta
+    check exists so that failure is loud rather than plausible.
+  - Speaker similarity is strongly length-dependent. Across the 14 XTTS clips of this run,
+    clip duration correlated with similarity at r = +0.82; clips of 8 seconds or more averaged
+    0.740 and shorter ones 0.627. The four-arm run used the three longest sentences and scored
+    them against a ceiling built from 17-second thirds, so its 78% was measured at a length the
+    production pipeline never sees. On all seven sentences the same arm is 70%, and on the
+    short ones alone 61%.
+  - This is the same class of error as scoring cross-lingual synthesis against a same-language
+    ceiling, which step 66 already corrected once: a ceiling measured under conditions the
+    thing being judged does not share. The fix is the same — measure the ceiling under matched
+    conditions rather than adjusting the score.
+  - The 14 segments the local pipeline exported from `english.mov` average under 5 seconds, so
+    production sits in the bucket where both the metric and, on this evidence, the model are
+    weakest. Whether IndicF5 degrades the same way is the question the next run answers.
