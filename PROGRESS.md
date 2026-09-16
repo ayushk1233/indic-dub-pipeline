@@ -683,3 +683,18 @@
   - Room tone is written un-normalized on purpose, since gain applied to it would destroy the
     noise-floor measurement it exists to carry. The gain applied to the other two files is
     recorded in `fixtures/metadata.json` instead.
+
+## Step 67 — Phase 4 (voice diagnosis) — repair the notebook's cell encoding
+
+- Completed: `colab/voice_experiment.ipynb` was written with each cell's `source` array
+  holding bare lines and no line terminators. nbformat treats that array as fragments to
+  concatenate, so Colab rendered every multi-line cell as a single line: the setup cell
+  became `%cd /content!git clone ...`, which fails with
+  `[Errno 2] No such file or directory: '/content!git clone ...'`. Rebuilt every cell with
+  `splitlines(keepends=True)`, and bumped `nbformat_minor` from 0 to 4.
+- Verification: PASSED. All 21 cells re-checked; no source entry before the last now lacks a
+  trailing newline. The setup cell reads back as six separate lines.
+- Deviations:
+  - The restart note pointed at cell numbers ("continue from cell 4", "do not re-run cell 2")
+    that did not match the cells it meant, and would not survive the notebook being rebuilt
+    by hand in a fresh Colab. It names sections instead now.
