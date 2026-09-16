@@ -737,3 +737,36 @@
     model should be recalibrated against synthesized audio, since XTTS is what fills the slot.
   - Greedy decoding beat sampling on three of four arms and tied on the fourth, agreeing with
     the determinism finding in `colab/xtts.md` for an unrelated reason.
+
+## Step 69 — Phase 4 (model choice) — reference transcripts and the IndicF5 comparison
+
+- Completed:
+  - `scripts/transcribe_fixtures.py` writes `fixtures/reference_text.json`, an ASR transcript
+    of each 25-second reference clip. IndicF5 conditions on reference audio together with
+    what was said in it, so a comparison against XTTS needs the transcript of exactly the
+    audio each model is handed — not the scripted text, since the reference is spans cut from
+    the middle of the take and the speaker did not read the script word for word.
+  - `colab/indicf5_check.py` runs XTTS-v2 and IndicF5 over the same two references and the
+    same seven Hindi sentences, scored by the same speaker encoder against the same anchors
+    and the same floor as the four-arm run.
+  - `colab/voice_experiment.ipynb` gains sections 9 to 11, and IndicF5's install moves into
+    the existing setup cell so one runtime restart covers both stacks.
+- Verification: PASSED. `scripts.transcribe_fixtures` run twice produces byte-identical
+  output. Both transcripts end cleanly at the clip boundary with no hallucinated tail.
+- Deviations:
+  - The transcription does not go through `FasterWhisperBackend`. Whisper's default decoding
+    retries at rising temperatures when a decode trips the compression-ratio guard, and these
+    clips trip it because they end mid-sentence. Those retries sample, so two runs of the
+    first version of this script disagreed about the Hindi tail — one closed on
+    `झाल झाल झाल झाल` and the other on `अजय को` four times. A committed fixture that changes
+    under its own re-run is not a fixture, so this script pins `temperature=0.0` and
+    `condition_on_previous_text=False` rather than changing the pipeline's own ASR settings.
+  - `strip_repetition_tail` survives as a backstop even though greedy decoding stopped the
+    loops at source and it no longer fires on either clip. It handles repeated phrases up to
+    four words, not just repeated single tokens, because the two observed hallucinations were
+    a repeated word and a repeated pair.
+  - Seven sentences per arm rather than the four-arm run's three, and the standard error is
+    reported. The within-arm spread there was 0.02 to 0.08, and a model difference worth
+    acting on could be 0.05, so three samples could not have resolved one.
+  - The XTTS arm is re-run inside this script rather than compared against the recorded
+    four-arm numbers, so both models are measured in one process against one calibration.

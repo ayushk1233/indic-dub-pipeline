@@ -1,0 +1,13 @@
+{
+  "_note": "ASR transcripts of the reference clips, for models that condition on audio and text together. Whisper output, so it carries ASR error; read it before trusting it. Produced by scripts/transcribe_fixtures.py with greedy decoding, so re-running it should reproduce this file exactly.",
+  "english": {
+    "file": "english_reference.wav",
+    "language": "en",
+    "text": "so let me tell you what this project actually does you get a video lecture and interview anything with clear speech and it gives you back the same video speaking in hindi simple right but it isn't hindi takes about 20 percent longer to say than the english it replaces and the words still have to land in the same 3 seconds so what do"
+  },
+  "hindi": {
+    "file": "hindi_reference.wav",
+    "language": "hi",
+    "text": "कि मैं आपको बताता हूं कि यह प्रोजेक्ट असल में करता गया है आप इसे एक वीडियो देते हैं कोई लेक्चर कोई इंटरव्यू कुछ भी जिसमें साफ आवाज हो और यह वही वीडियो हिंदी में बोलता हुआ वापस देता है आसान लगता है है ना लेकिन नहीं हिंदी को कहने में अंग्रीजी से लगभग बीस प्रतिशत ज्यादा समय लगता है"
+  }
+}
