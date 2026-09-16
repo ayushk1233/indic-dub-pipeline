@@ -856,3 +856,31 @@
   - The 14 segments the local pipeline exported from `english.mov` average under 5 seconds, so
     production sits in the bucket where both the metric and, on this evidence, the model are
     weakest. Whether IndicF5 degrades the same way is the question the next run answers.
+
+## Step 73 — Phase 4 (model choice) — load IndicF5 outside transformers' meta context
+
+- Completed: `colab/indicf5_check.py` now builds IndicF5's remote class directly — read
+  `auto_map["AutoModel"]` from the config, fetch the class with
+  `get_class_from_dynamic_module`, instantiate it against the config, and load
+  `model.safetensors` on top — with `AutoModel.from_pretrained` kept as a fallback. Both
+  routes are checked for meta tensors before and after the device move.
+- Verification: PARTIAL, and honestly so. The duration-matched calibration ran and behaved as
+  designed: the cross-language ceiling falls from 0.887 at 16.7s to 0.779 at 3.6s, and XTTS's
+  short-segment penalty shrank from 16 points to 9 once each clip was placed against a ceiling
+  measured at its own length. The IndicF5 loader itself is unverified — the repository is
+  gated, so it cannot be exercised from this machine, and the next Colab run is the test.
+- Deviations:
+  - `low_cpu_mem_usage=False` did not fix the meta-tensor failure, because the exception is
+    raised from inside the remote `__init__` rather than from the weight loading that flag
+    governs. transformers runs that `__init__` under an empty-weights context; IndicF5 builds
+    its Vocos vocoder there and calls `.to(device)` on it, which cannot copy out of meta. No
+    argument to `from_pretrained` reaches that, so the constructor has to be called directly.
+  - The checkpoint-match check reports missing keys but only refuses on unexpected keys or on
+    more than half the parameters missing. Vocos is downloaded separately by the remote
+    `__init__` and lives under an attribute name that cannot be inspected from here, so its
+    keys are legitimately absent; failing on any missing key would have rejected a correct
+    load. Refusing on a name mismatch still catches the case that matters, which is a model
+    left at random initialization that runs fine and sounds wrong.
+  - Short-clip similarity was partly a measurement artifact and partly real. Against a single
+    long-clip ceiling the gap looked like 0.627 against 0.740; against length-matched ceilings
+    it is 71% against 80%. The metric was exaggerating the penalty, but a penalty remains.

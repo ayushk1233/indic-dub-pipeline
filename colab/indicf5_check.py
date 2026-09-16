@@ -107,57 +107,123 @@ def sentences(text, minimum=25):
     return [s.strip() for s in _SENTENCE_RE.split(text or "") if len(s.strip()) >= minimum]
 
 
-def load_indicf5():
+def _assert_materialized(model):
     """
-    Load IndicF5 through transformers' remote-code path, with real weights.
+    Refuse a model whose weights were never actually allocated.
 
-    transformers builds a model on the meta device by default now and fills it
-    afterwards. IndicF5's remote code constructs its Vocos vocoder inside its
-    own __init__, and that submodule inherits the meta context but not the
-    fill, so every parameter loads as a no-op:
-
-        UserWarning: for backbone.embed.weight: copying from a non-meta
-        parameter in the checkpoint to a meta parameter in the current model,
-        which is a no-op.
-
-    `low_cpu_mem_usage=False` turns that initialization off and allocates real
-    storage. The check afterwards is the important half: a meta-weighted model
-    does not raise on its own, it synthesizes noise, and noise scored against a
-    speaker anchor looks exactly like a model that clones badly. That failure
-    would have been reported as a result rather than as a bug, so it is made
-    loud here instead.
+    A meta-weighted model does not raise on its own: it synthesizes noise, and
+    noise scored against a speaker anchor looks exactly like a model that
+    clones badly. That failure would be written down as a result rather than
+    as a bug, so it is made loud here.
     """
-    from transformers import AutoModel
-
-    errors = []
-    model = None
-
-    for kwargs in ({"low_cpu_mem_usage": False}, {}):
-        try:
-            model = AutoModel.from_pretrained(
-                INDICF5_REPO, trust_remote_code=True, **kwargs
-            )
-            break
-        except TypeError as exc:
-            errors.append(f"{kwargs}: {exc}")
-
-    if model is None:
-        raise RuntimeError("; ".join(errors))
-
     meta = [name for name, tensor in model.named_parameters() if tensor.is_meta]
     meta += [name for name, tensor in model.named_buffers() if tensor.is_meta]
 
     if meta:
         raise RuntimeError(
             f"{len(meta)} parameters are still on the meta device "
-            f"(first: {meta[0]}). The weights were never materialized, so this "
-            f"model would synthesize noise rather than speech."
+            f"(first: {meta[0]}); the weights were never materialized"
         )
+
+    return model
+
+
+def _load_direct():
+    """
+    Build IndicF5's remote class directly, outside transformers' meta context.
+
+    `AutoModel.from_pretrained` runs the remote `__init__` under an
+    empty-weights context, so every parameter it creates lands on the meta
+    device. IndicF5 builds its Vocos vocoder inside that `__init__` and calls
+    `.to(device)` on it there, which raises:
+
+        NotImplementedError: Cannot copy out of meta tensor; no data!
+
+    `low_cpu_mem_usage=False` does not help, because the exception comes from
+    inside `__init__` rather than from the weight-loading that flag controls.
+
+    Instantiating the class ourselves skips that context entirely: the module
+    tree and the vocoder are built with real storage, and the checkpoint is
+    then loaded on top. Key mismatches are reported rather than swallowed,
+    because `strict=False` silently tolerating a renamed prefix would leave a
+    randomly-initialized model that runs perfectly well and sounds wrong.
+    """
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file
+    from transformers import AutoConfig
+    from transformers.dynamic_module_utils import get_class_from_dynamic_module
+
+    config = AutoConfig.from_pretrained(INDICF5_REPO, trust_remote_code=True)
+
+    auto_map = getattr(config, "auto_map", None) or {}
+    reference = auto_map.get("AutoModel")
+
+    if not reference:
+        raise RuntimeError(f"config has no auto_map['AutoModel']: {auto_map}")
+
+    model_class = get_class_from_dynamic_module(reference, INDICF5_REPO)
+    model = model_class(config)
+
+    state = load_file(hf_hub_download(INDICF5_REPO, "model.safetensors"))
+    missing, unexpected = model.load_state_dict(state, strict=False)
+
+    total = sum(1 for _ in model.named_parameters())
+
+    if missing or unexpected:
+        p(f"  checkpoint: {len(missing)} missing of {total} parameters, "
+          f"{len(unexpected)} unexpected")
+        if missing:
+            p(f"    first missing: {missing[0]}")
+        if unexpected:
+            p(f"    first unexpected: {unexpected[0]}")
+
+    # Vocos is fetched by the remote __init__ from its own repo, so some of
+    # this model's parameters are legitimately absent from this checkpoint and
+    # a few missing keys are expected. What is not survivable is the checkpoint
+    # belonging to a different model: unexpected keys mean the names do not
+    # line up, and a majority of parameters missing means most of the network
+    # is still at its random initialization. Either way it would run fine and
+    # sound wrong, which is the failure worth refusing.
+    if unexpected or (total and len(missing) > total / 2):
+        raise RuntimeError(
+            f"checkpoint does not match the model: {len(missing)}/{total} "
+            f"missing, {len(unexpected)} unexpected"
+        )
+
+    return model
+
+
+def load_indicf5():
+    """
+    Load IndicF5 with real weights, by whichever route works.
+
+    The direct route is tried first because it is the one that survives
+    transformers' meta-device initialization. `from_pretrained` stays as a
+    fallback for the case where a future version stops needing the workaround,
+    and both are checked for meta tensors before being returned.
+    """
+    attempts = []
+
+    for name, build in (("direct", _load_direct),
+                        ("from_pretrained", lambda: __import__(
+                            "transformers", fromlist=["AutoModel"]
+                        ).AutoModel.from_pretrained(
+                            INDICF5_REPO, trust_remote_code=True))):
+        try:
+            model = _assert_materialized(build())
+            p(f"  loaded via {name}")
+            break
+        except Exception as exc:
+            attempts.append(f"{name}: {type(exc).__name__}: {exc}")
+            model = None
+
+    if model is None:
+        raise RuntimeError(" | ".join(attempts))
 
     if torch.cuda.is_available():
         model = model.to("cuda")
 
-    return model
+    return _assert_materialized(model)
 
 
 def as_float_wave(audio):
