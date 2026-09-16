@@ -770,3 +770,31 @@
     acting on could be 0.05, so three samples could not have resolved one.
   - The XTTS arm is re-run inside this script rather than compared against the recorded
     four-arm numbers, so both models are measured in one process against one calibration.
+
+## Step 70 — Phase 4 (model choice) — the numpy downgrade that broke XTTS silently
+
+- Completed: pinned `numpy>=2.1,<3` in `colab/requirements.txt` and reordered the notebook's
+  setup cell to install IndicF5 first and this repo's pins second, so our constraints are the
+  ones that survive the resolver. Added `pip check` to the setup cell.
+- Verification: PASSED by diagnosis rather than by test. Installing IndicF5 alongside the XTTS
+  stack made `import TTS` fail with `cannot import name 'GPT2PreTrainedModel' from
+  'transformers'`, while `transformers.__version__` reported 4.57.6 — inside the existing pin.
+  Probing the namespace showed `GPT2Config` present but `GPT2PreTrainedModel`, `GPT2LMHeadModel`
+  and `BertModel` absent, and importing the module directly raised the real error:
+  `module 'numpy.dtypes' has no attribute 'StringDType'`. That attribute arrived in numpy 2.0;
+  IndicF5 had pulled numpy back to 1.x.
+- Deviations:
+  - The failure mode is worth recording on its own. transformers' lazy loader catches the
+    `AttributeError` raised while building its torch-backed classes and drops those names from
+    the namespace instead of propagating it. The result is that `import transformers` succeeds,
+    the version string looks correct, and the only symptom is a missing name reported three
+    layers downstream inside a different package. A version pin cannot catch this, because the
+    version was never wrong — the dependency underneath it was.
+  - Two hypotheses were wrong before the diagnostic ran: that transformers had dropped the
+    top-level re-export in a patch release, and that torch registration had failed wholesale.
+    `is_torch_available()` returning True while model classes were missing ruled out both.
+  - Whether f5-tts tolerates numpy 2 is unverified from here. If it declares `numpy<2` the
+    resolver cannot satisfy both, and the fallback is to run the two models in separate
+    kernels: `/content` survives a restart, so XTTS can synthesize and save its anchors,
+    IndicF5 can synthesize into the same directory after a restart, and a third pass on the
+    XTTS stack can score everything together.

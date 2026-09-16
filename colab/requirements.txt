@@ -25,3 +25,14 @@ transformers>=4.57,<5
 soundfile
 librosa>=0.10.0
 einops
+
+# numpy>=2 is not optional, and nothing here declares it loudly enough on its
+# own. transformers 4.57 touches numpy.dtypes.StringDType, which arrived in
+# numpy 2.0. Installing IndicF5 pulls numpy back to 1.x, and the failure is
+# invisible: transformers' lazy loader catches the AttributeError and quietly
+# drops every torch-backed class from its namespace, so `import transformers`
+# succeeds, `transformers.__version__` prints a version inside this file's own
+# pin, and `from transformers import GPT2PreTrainedModel` fails three layers
+# downstream inside coqui-tts. Pin it here, and install this file *after*
+# IndicF5 so these constraints are the ones that win.
+numpy>=2.1,<3
