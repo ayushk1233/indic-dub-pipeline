@@ -884,3 +884,49 @@
   - Short-clip similarity was partly a measurement artifact and partly real. Against a single
     long-clip ceiling the gap looked like 0.627 against 0.740; against length-matched ceilings
     it is 71% against 80%. The metric was exaggerating the penalty, but a penalty remains.
+
+## Step 74 — Phase 4 (model choice) — IndicF5 wins on identity, and its duration model is broken
+
+- Completed: ran the comparison on a T4. IndicF5 loaded via the direct route and beat XTTS-v2
+  decisively on the production case.
+
+  | model | arm | sim | position | cps vs natural |
+  |---|---|---|---|---|
+  | xtts | en_ref | 0.656 | 77% | 1.06x |
+  | xtts | hi_ref | 0.695 | 74% | 1.04x |
+  | indicf5 | en_ref | 0.800 | **97%** | 0.87x |
+  | indicf5 | hi_ref | 0.713 | 81% | **2.07x** |
+
+  Added a 10-second reference fixture and its transcript (`*_reference_short.wav`,
+  `english_short` / `hindi_short` in `reference_text.json`), split the arm lists per model, and
+  added a PACE section that recovers how much reference audio IndicF5 actually used.
+- Verification: PASSED for identity. The production gap is +0.144 with a combined standard
+  error of 0.031, which is 4.6 standard errors on n=7 per arm. IndicF5 also held up where it
+  mattered most: on clips under 8 seconds it placed at 86% against XTTS's 71%, so the
+  short-segment weakness that worried us is XTTS's, not the metric's alone. 110 tests green.
+- Deviations:
+  - IndicF5's `hi_ref` arm returned every sentence at 0.48x the duration natural Hindi needs,
+    with a standard deviation of 0.02 across seven sentences. That consistency identified the
+    mechanism: the model sets generated length from the UTF-8 byte ratio of generated to
+    reference transcript, scaled by the reference audio's duration. Inverting it recovers the
+    reference length it actually used — 13.7s (sd 0.1) for English and 12.4s (sd 0.0) for
+    Hindi, against 25s clips. It clips the audio but keeps the whole transcript.
+  - The deeper fault is that the byte ratio assumes one script. Devanagari is three bytes per
+    character and Latin one, so an English reference implies 0.075 s/byte where generating
+    Hindi needs 0.035 — an overstatement of about 2.15x. The `en_ref` arm's apparently healthy
+    0.87x was luck: clipping 25s to 13.7s divided by 1.83 and very nearly cancelled the script
+    inflation. Two errors of opposite sign, not a working duration model.
+  - This matters more than it would for most projects, because output duration is the problem
+    this pipeline exists around. A model that cannot be asked for a length cannot be dropped
+    into the length-control stage unchanged.
+  - The next run is a prediction rather than an observation: with unclipped 10s references the
+    byte ratio predicts 2.17x natural for `en_ref_10s` and 1.08x for `hi_ref_10s`. Those
+    numbers are printed beside the observed ones. If they land, the duration behaviour is
+    fully characterized; if the implied reference length comes back near 10.5s, clipping is
+    ruled out as well.
+  - The 25s English arm is retained as a control so the bug and its correction appear in the
+    same report rather than being asserted from a previous one.
+  - A Hindi reference is the configuration whose pacing is correct by construction, which
+    bears on the fixed-roster question raised in step 66: recording each speaker once in Hindi
+    would make the production path `hi -> hi`, where the duration arithmetic is self-consistent.
+    Unverified until the next run.

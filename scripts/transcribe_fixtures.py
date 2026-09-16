@@ -31,9 +31,16 @@ from faster_whisper import WhisperModel
 FIXTURES = Path("fixtures")
 OUTPUT = FIXTURES / "reference_text.json"
 
+# The short clips matter more than the long ones for any model that derives
+# output duration from the reference. IndicF5 scales generated length by the
+# ratio of generated to reference transcript bytes, times the reference audio's
+# duration — so the transcript has to describe exactly the audio the model
+# uses, or the timing is wrong by whatever the mismatch is.
 REFERENCES = {
     "english": ("english_reference.wav", "en"),
     "hindi": ("hindi_reference.wav", "hi"),
+    "english_short": ("english_reference_short.wav", "en"),
+    "hindi_short": ("hindi_reference_short.wav", "hi"),
 }
 
 # Greedy, with no temperature fallback ladder. Whisper's default is to retry at

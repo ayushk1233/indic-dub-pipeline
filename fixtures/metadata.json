@@ -14,9 +14,17 @@
       ]
     ],
     "reference_s": 25.0,
+    "reference_short_spans": [
+      [
+        10.663,
+        20.663
+      ]
+    ],
+    "reference_short_s": 10.0,
     "lead_silence_s": 10.663,
     "files": {
       "reference": "english_reference.wav",
+      "reference_short": "english_reference_short.wav",
       "speech": "english_speech.wav",
       "room_tone": "english_room_tone.wav"
     },
@@ -37,9 +45,17 @@
       ]
     ],
     "reference_s": 25.0,
+    "reference_short_spans": [
+      [
+        8.697,
+        18.697
+      ]
+    ],
+    "reference_short_s": 10.0,
     "lead_silence_s": 8.697,
     "files": {
       "reference": "hindi_reference.wav",
+      "reference_short": "hindi_reference_short.wav",
       "speech": "hindi_speech.wav",
       "room_tone": "hindi_room_tone.wav"
     },

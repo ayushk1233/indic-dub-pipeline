@@ -241,7 +241,9 @@ def as_float_wave(audio):
 
 def main():
     needed = ["english_speech.wav", "hindi_speech.wav", "english_reference.wav",
-              "hindi_reference.wav", "scripted_text.json", "reference_text.json"]
+              "hindi_reference.wav", "english_reference_short.wav",
+              "hindi_reference_short.wav", "scripted_text.json",
+              "reference_text.json"]
     missing = [n for n in needed if not (FIXTURES / n).exists()]
 
     if missing:
@@ -374,10 +376,32 @@ def main():
     # The English reference speaking Hindi is scored against the cross-language
     # curve; the Hindi reference against the same-language one. Each clip is
     # then placed against the point on that curve nearest its own duration.
-    arms = [
+    #
+    # The two models get different reference lengths on purpose. XTTS clones
+    # timbre from whatever it is handed and its output duration does not depend
+    # on the reference at all. IndicF5 scales generated length by the ratio of
+    # generated to reference transcript bytes, times the reference audio's
+    # duration — and it clips the reference internally. Handed the 25s clips it
+    # used only 12 to 14 seconds of them while still using the whole transcript,
+    # so it believed the speaker talks twice as fast as he does and returned
+    # every Hindi sentence at 0.48x the duration natural Hindi needs, with a
+    # standard deviation of 0.0 across seven sentences. The 10s references sit
+    # under that clipping threshold. The 25s arm is kept as a control so the
+    # bug and its fix are visible in the same run rather than asserted.
+    xtts_arms = [
         ("en_ref", "english_reference.wav", "english", anchor_en, cross_curve),
         ("hi_ref", "hindi_reference.wav", "hindi", anchor_hi, same_curve),
     ]
+
+    indicf5_arms = [
+        ("en_ref_10s", "english_reference_short.wav", "english_short",
+         anchor_en, cross_curve),
+        ("hi_ref_10s", "hindi_reference_short.wav", "hindi_short",
+         anchor_hi, same_curve),
+        ("en_ref_25s", "english_reference.wav", "english",
+         anchor_en, cross_curve),
+    ]
+
 
     rows = []
 
@@ -406,7 +430,7 @@ def main():
 
     section("XTTS-v2   (CPML, non-commercial — the baseline, not a candidate)")
 
-    for arm, filename, _, anchor, points in arms:
+    for arm, filename, _, anchor, points in xtts_arms:
         latent, embedding = latents(FIXTURES / filename, **CONDITIONING)
         p(f"\n--- xtts {arm} -> hi")
 
@@ -437,7 +461,7 @@ def main():
         indicf5 = None
 
     if indicf5 is not None:
-        for arm, filename, key, anchor, points in arms:
+        for arm, filename, key, anchor, points in indicf5_arms:
             transcript = ref_text[key]["text"]
             p(f"\n--- indicf5 {arm} -> hi")
             p(f"    conditioned on {len(transcript)} chars of {key} transcript")
@@ -467,8 +491,8 @@ def main():
     p("")
 
     table = {}
-    for model in ("xtts", "indicf5"):
-        for arm, _, _, _, _ in arms:
+    for model, model_arms in (("xtts", xtts_arms), ("indicf5", indicf5_arms)):
+        for arm, _, _, _, _ in model_arms:
             items = [r for r in rows if r["model"] == model and r["arm"] == arm]
             scores = [r["sim"] for r in items if np.isfinite(r["sim"])]
             places = [r["position"] for r in items if np.isfinite(r["position"])]
@@ -489,6 +513,65 @@ def main():
             p(f"{model:<10}{arm:<9}{len(scores):>3}{mean:>8.3f}{se:>7.3f}"
               f"{place:>9.0f}%{place_se:>6.0f}"
               f"{cps:>7.1f}{cps / NATURAL_CPS_HI:>8.2f}x{gen:>7.1f}s")
+
+    section("PACE — is the generated audio the right length?")
+    p("  IndicF5 sets generated duration from a byte ratio:")
+    p("      gen_seconds  =  ref_seconds x gen_bytes / ref_bytes")
+    p("  Inverting it recovers how much reference audio the model actually used.")
+    p("  If that comes back near the clip's real length, the timing is sound; if")
+    p("  it comes back short, the reference was clipped and every duration is")
+    p("  scaled by the same wrong factor.")
+    p("")
+    p(f"  {'model':<10}{'arm':<12}{'ref':>6}{'cps':>7}{'natural':>9}"
+      f"{'implied ref':>13}{'sd':>7}{'predicted':>11}")
+    p("")
+    p("  'predicted' assumes the reference is used whole and the byte ratio holds.")
+    p("  Where it matches, the duration behaviour is understood. Where the implied")
+    p("  reference comes back shorter than the clip, the model clipped it.")
+
+    ref_seconds = {}
+    for name in ("english_reference.wav", "hindi_reference.wav",
+                 "english_reference_short.wav", "hindi_reference_short.wav"):
+        try:
+            ref_seconds[name] = sf.info(str(FIXTURES / name)).duration
+        except Exception:
+            pass
+
+    for model, model_arms in (("xtts", xtts_arms), ("indicf5", indicf5_arms)):
+        for arm, filename, key, _, _ in model_arms:
+            items = [r for r in rows if r["model"] == model and r["arm"] == arm]
+            if not items:
+                continue
+
+            actual = ref_seconds.get(filename, float("nan"))
+            ref_bytes = len(ref_text[key]["text"].encode()) if key in ref_text else 0
+            implied = [r["dur"] * ref_bytes / len(r["text"].encode())
+                       for r in items if ref_bytes and r["text"]]
+            cps = float(np.mean([r["cps"] for r in items]))
+
+            if implied and model == "indicf5":
+                shown = f"{np.mean(implied):>12.1f}s{np.std(implied):>7.1f}"
+                # Whole reference, byte ratio held: what pace should come out.
+                wanted = [actual * len(r["text"].encode()) / ref_bytes for r in items]
+                natural = [len(r["text"]) / NATURAL_CPS_HI for r in items]
+                predicted = f"{np.mean(wanted) / np.mean(natural):>10.2f}x"
+            else:
+                shown = f"{'-':>13}{'-':>7}"
+                predicted = f"{'-':>11}"
+
+            p(f"  {model:<10}{arm:<12}{actual:>5.1f}s{cps:>7.1f}"
+              f"{cps / NATURAL_CPS_HI:>8.2f}x{shown}{predicted}")
+
+    p("")
+    p("  XTTS is listed for pace only. Its output duration does not depend on")
+    p("  the reference, so the implied-length arithmetic does not apply to it.")
+    p("")
+    p("  The byte ratio assumes the reference and the generated text share a")
+    p("  script. They do not: Devanagari is three bytes per character and Latin")
+    p("  is one, so an English reference implies 0.075 s/byte where generating")
+    p("  Hindi needs 0.035. An English reference therefore overstates duration by")
+    p("  about 2.15x, and last run's en_ref only looked correct because clipping")
+    p("  25s down to 13.7s divided by 1.83 and very nearly cancelled it.")
 
     section("LENGTH — does either model hold up on short segments?")
     p("  Real dubbing segments are short. The 14-segment bundle from english.mov")
@@ -517,7 +600,8 @@ def main():
 
     section("VERDICT")
 
-    production = [table.get(("xtts", "en_ref")), table.get(("indicf5", "en_ref"))]
+    production = [table.get(("xtts", "en_ref")),
+                  table.get(("indicf5", "en_ref_10s"))]
 
     if all(production):
         (x_mean, x_se, x_pos, _), (i_mean, i_se, i_pos, _) = production

@@ -9,5 +9,15 @@
     "file": "hindi_reference.wav",
     "language": "hi",
     "text": "कि मैं आपको बताता हूं कि यह प्रोजेक्ट असल में करता गया है आप इसे एक वीडियो देते हैं कोई लेक्चर कोई इंटरव्यू कुछ भी जिसमें साफ आवाज हो और यह वही वीडियो हिंदी में बोलता हुआ वापस देता है आसान लगता है है ना लेकिन नहीं हिंदी को कहने में अंग्रीजी से लगभग बीस प्रतिशत ज्यादा समय लगता है"
+  },
+  "english_short": {
+    "file": "english_reference_short.wav",
+    "language": "en",
+    "text": "So let me tell you what this project actually does. You get a video, lecture and interview anything with clear speech and it gives you."
+  },
+  "hindi_short": {
+    "file": "hindi_reference_short.wav",
+    "language": "hi",
+    "text": "कि मैं आपको बताता हूं कि यह प्रोजेक्ट असल में करता गया आप इसे एक वीडियो देते हैं कोई लेक्चर कोई इंटरव्यू"
   }
 }

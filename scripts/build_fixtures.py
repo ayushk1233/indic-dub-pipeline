@@ -73,6 +73,20 @@ ROOM_TONE_EDGE_S = 0.1
 ROOM_TONE_MIN_S = 1.0
 ROOM_TONE_MAX_S = 6.0
 
+# A second, shorter reference, for models that derive output duration from the
+# reference rather than only cloning timbre from it.
+#
+# IndicF5 estimates how long a generated sentence should be from the ratio of
+# its UTF-8 byte length to the reference transcript's, scaled by the reference
+# audio's duration. It also clips the reference audio internally, and measured
+# against the 25-second clips it used only about 12 to 14 seconds of them while
+# still using the whole transcript. That makes it believe the speaker talks
+# twice as fast as he does: every Hindi sentence came back at 0.48x the
+# duration natural Hindi needs, with a standard deviation of 0.0 across seven
+# sentences. Ten seconds sits below any clipping threshold observed, so the
+# ratio is computed against audio the model actually used.
+TARGET_SHORT_REFERENCE_S = 10.0
+
 
 def probe_duration(path: Path) -> float:
     process = subprocess.run(
@@ -194,6 +208,26 @@ def cut_raw(source: Path, start: float, duration: float, output: Path) -> None:
     )
 
 
+def truncate_spans(
+    spans: list[tuple[float, float]], budget: float
+) -> list[tuple[float, float]]:
+    """
+    Take spans in order until `budget` seconds are covered, cutting the last.
+    """
+    out: list[tuple[float, float]] = []
+    total = 0.0
+
+    for start, end in spans:
+        if total >= budget:
+            break
+        end = min(end, start + (budget - total))
+        if end > start:
+            out.append((start, end))
+            total += end - start
+
+    return out
+
+
 def build(source: Path, name: str, transcript: str | None) -> dict:
     FIXTURES.mkdir(parents=True, exist_ok=True)
 
@@ -206,6 +240,13 @@ def build(source: Path, name: str, transcript: str | None) -> dict:
 
     reference = build_reference(source, chosen, FIXTURES / f"{name}_reference.wav")
     speech = build_reference(source, spans, FIXTURES / f"{name}_speech.wav")
+
+    # Cut from the same spans rather than trimmed off the finished reference,
+    # so the short clip is built by the same path and carries the same gain.
+    short_spans = truncate_spans(chosen, TARGET_SHORT_REFERENCE_S)
+    short = build_reference(
+        source, short_spans, FIXTURES / f"{name}_reference_short.wav"
+    )
 
     # Room tone is the longest silence in the take, which on these recordings
     # is the stretch before the first word. Taking the longest rather than
@@ -238,9 +279,12 @@ def build(source: Path, name: str, transcript: str | None) -> dict:
         "speech_s": round(sum(e - s for s, e in spans), 2),
         "reference_spans": [[round(s, 3), round(e, 3)] for s, e in chosen],
         "reference_s": round(sum(e - s for s, e in chosen), 2),
+        "reference_short_spans": [[round(s, 3), round(e, 3)] for s, e in short_spans],
+        "reference_short_s": round(sum(e - s for s, e in short_spans), 2),
         "lead_silence_s": round(lead, 3),
         "files": {
             "reference": reference.name,
+            "reference_short": short.name,
             "speech": speech.name,
             "room_tone": tone_path.name if tone_path else None,
         },
