@@ -639,9 +639,16 @@ def main():
     return rows
 
 
-def listen(rows=None):
+def listen(rows=None, arms=None, indexes=None):
     """
-    Play the real recording, then both models side by side per sentence.
+    Play the real recording, then each arm on the same sentence.
+
+    `arms` narrows the comparison — with five arms and seven sentences the
+    full set is 35 clips, which is more than anyone listens to carefully.
+    `indexes` narrows to particular sentences.
+
+        listen(rows, arms=("en_ref", "hi_ref_10s", "en_ref_25s"))
+        listen(rows, indexes=(5, 6))          # the short ones
     """
     from IPython.display import Audio, HTML, display
 
@@ -651,23 +658,58 @@ def listen(rows=None):
             rows.append({"model": path.parent.parent.name, "arm": path.parent.name,
                          "index": int(path.stem), "path": path,
                          "dur": sf.info(str(path)).duration, "sim": float("nan"),
-                         "text": ""})
+                         "text": "", "position": float("nan")})
 
-    display(HTML("<h3>You, speaking Hindi — the target</h3>"))
+    if arms:
+        rows = [r for r in rows if r["arm"] in arms]
+    if indexes is not None:
+        rows = [r for r in rows if r["index"] in indexes]
+
+    if not rows:
+        display(HTML("<p>Nothing matched that filter.</p>"))
+        return
+
+    display(HTML(
+        "<h3>You, speaking Hindi &mdash; the target</h3>"
+        "<p style='color:#666;margin:2px 0 8px'>Everything below is judged "
+        "against this, on three axes the similarity score cannot see: is it "
+        "you, does it say the whole sentence, and does the stress land where "
+        "you would put it?</p>"
+    ))
     display(Audio(filename=str(FIXTURES / "hindi_speech.wav")))
 
     for index in sorted({r["index"] for r in rows}):
         items = [r for r in rows if r["index"] == index]
-        display(HTML(f"<h3 style='margin:18px 0 4px'>Sentence {index}</h3>"
-                     f"<div style='font-size:15px'>{items[0].get('text', '')}</div>"))
+        text = next((r["text"] for r in items if r.get("text")), "")
+        natural = len(text) / NATURAL_CPS_HI if text else None
+
+        header = f"<h3 style='margin:20px 0 4px'>Sentence {index}</h3>"
+        if text:
+            header += f"<div style='font-size:15px'>{text}</div>"
+        if natural:
+            header += (f"<div style='color:#666;font-size:13px;margin-top:3px'>"
+                       f"natural Hindi would take about {natural:.1f}s</div>")
+        display(HTML(header))
+
         for row in sorted(items, key=lambda r: (r["model"], r["arm"])):
-            sim = row.get("sim")
-            label = f"{row['model']} · {row['arm']}"
-            detail = f"{row['dur']:.2f}s"
+            bits = [f"{row['dur']:.2f}s"]
+
+            if natural:
+                ratio = row["dur"] / natural
+                flag = "" if 0.8 <= ratio <= 1.25 else "  <-- pace"
+                bits.append(f"{ratio:.2f}x natural{flag}")
+
+            sim, place = row.get("sim"), row.get("position")
             if isinstance(sim, float) and np.isfinite(sim):
-                detail += f", sim {sim:.3f}"
-            display(HTML(f"<div style='margin-top:8px'><b>{label}</b> "
-                         f"<span style='color:#666'>— {detail}</span></div>"))
+                bits.append(f"sim {sim:.3f}")
+            if isinstance(place, float) and np.isfinite(place):
+                bits.append(f"{place:.0f}% of scale")
+
+            display(HTML(
+                f"<div style='margin-top:10px'><b>{row['model']} &middot; "
+                f"{row['arm']}</b> <span style='color:#666'>&mdash; "
+                f"{', '.join(bits)}</span></div>"
+            ))
             display(Audio(filename=str(row["path"])))
 
 
