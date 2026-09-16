@@ -646,3 +646,40 @@
     impossible, so the assembly cascade still has to finish the job. That was expected: the
     measured expansion is in articulation rate, not text length, and no amount of shortening
     reaches the part of the gap that comes from Hindi simply being slower per character.
+
+## Step 66 — Phase 1 (evaluation): a controlled recording session, and the fixtures from it
+
+- Completed: a two-take recording session replaces the single contaminated reference the
+  project had been measuring against, and the derived audio is committed so a fresh Colab
+  runtime reaches it with `git pull` instead of a 200 MB upload.
+  - `scripts/build_fixtures.py` cuts three files from each take: the conditioning reference
+    (25s, through the same Segmenter and `build_reference` path the pipeline uses at export),
+    every speech span joined, and the room tone at its recorded gain.
+  - `colab/four_arm.py` runs en->en, hi->hi, en->hi and hi->en from the same speaker, and
+    calibrates the similarity scale before using any of it.
+  - `colab/voice_experiment.ipynb` drives the whole thing from a clean runtime.
+- Verification: PASSED. 110 tests still green. The new takes measure 30.7 dB and 31.4 dB SNR
+  against the old reference's 17.1 dB — a 21 dB drop in noise floor. ASR word error rate
+  against the scripted text is 7.9% after number normalization, and three of the remaining
+  nine errors are filler words the speaker actually said, so true ASR error is near 5%.
+- Deviations:
+  - The similarity metric was uncalibrated for this project's entire history. Measuring it
+    properly puts the ceiling at 0.922 (the speaker against himself) and the floor at 0.124
+    (58 different real speakers), a span of about 0.80. The seven-configuration conditioning
+    sweep in step 64 spanned 0.046, which is 5.8% of the measurement range. That sweep
+    reported a winner it had no power to detect, and conditioning is therefore held at the
+    shipped XTTS-v2 config values here rather than at the value it picked.
+  - English cloning scored *below* Hindi (0.466 against 0.511) on the old reference. That is
+    the opposite of the prediction that cross-lingual transfer was the bottleneck, and it is
+    why the four-arm design exists: no single-arm experiment could have caught it.
+  - The cross-language ceiling is still unmeasured. Speaker embeddings shift between
+    languages even for a real person, so `en -> hi` synthesis has never been scored against a
+    ceiling it could actually reach. `colab/four_arm.py` measures it from the real Hindi take
+    before scoring anything synthetic.
+  - `build_fixtures.py` filters speech spans by level rather than trusting silence detection
+    alone. At -45 dB the recorded room tone fragments into transients, and the gaps between
+    them survive as speech spans made entirely of noise. The pipeline's own -30 dB threshold
+    does not hit this, so no pipeline behaviour was changed.
+  - Room tone is written un-normalized on purpose, since gain applied to it would destroy the
+    noise-floor measurement it exists to carry. The gain applied to the other two files is
+    recorded in `fixtures/metadata.json` instead.

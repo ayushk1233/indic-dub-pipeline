@@ -1,0 +1,48 @@
+{
+  "english": {
+    "source": "english.mov",
+    "source_duration_s": 64.48,
+    "source_peak_dbfs": -8.4,
+    "normalized_to_dbfs": -1.0,
+    "gain_applied_db": 7.4,
+    "num_speech_spans": 1,
+    "speech_s": 49.6,
+    "reference_spans": [
+      [
+        10.663,
+        35.663
+      ]
+    ],
+    "reference_s": 25.0,
+    "lead_silence_s": 10.663,
+    "files": {
+      "reference": "english_reference.wav",
+      "speech": "english_speech.wav",
+      "room_tone": "english_room_tone.wav"
+    },
+    "scripted_text": "Let me tell you what this project actually does. You give it a video — a lecture, an interview, anything with clear speech — and it gives you back the same video speaking Hindi. Simple, right? It isn't. Hindi takes about twenty percent longer to say than the English it replaces, and the words still have to land in the same three seconds. So what do we do? We generate six different translations for every sentence, measure how long each one would take to speak, and keep the one that fits without losing the meaning. Last week the system processed forty-seven segments. Thirty-one fit perfectly. Nine needed stretching. Seven were impossible, and we had to rewrite them. That's the real work — not the models, the arithmetic between them."
+  },
+  "hindi": {
+    "source": "hindi.mov",
+    "source_duration_s": 73.812,
+    "source_peak_dbfs": -0.5,
+    "normalized_to_dbfs": -1.0,
+    "gain_applied_db": -0.5,
+    "num_speech_spans": 1,
+    "speech_s": 59.22,
+    "reference_spans": [
+      [
+        8.697,
+        33.697
+      ]
+    ],
+    "reference_s": 25.0,
+    "lead_silence_s": 8.697,
+    "files": {
+      "reference": "hindi_reference.wav",
+      "speech": "hindi_speech.wav",
+      "room_tone": "hindi_room_tone.wav"
+    },
+    "scripted_text": "मैं आपको बताता हूँ कि यह प्रोजेक्ट असल में क्या करता है। आप इसे एक वीडियो देते हैं — कोई लेक्चर, कोई इंटरव्यू, कुछ भी जिसमें साफ़ आवाज़ हो — और यह वही वीडियो हिंदी में बोलता हुआ वापस देता है। आसान लगता है, है ना? है नहीं। हिंदी को कहने में अंग्रेज़ी से लगभग बीस प्रतिशत ज़्यादा समय लगता है, और शब्द फिर भी उन्हीं तीन सेकंड में आने चाहिए। तो हम क्या करते हैं? हम हर वाक्य के लिए छह अलग अनुवाद बनाते हैं, नापते हैं कि हर एक को बोलने में कितना समय लगेगा, और वही रखते हैं जो समय में फ़िट हो और मतलब भी न खोए। पिछले हफ़्ते सिस्टम ने सैंतालीस सेगमेंट प्रोसेस किए। इकतीस बिल्कुल फ़िट हुए। नौ को खींचना पड़ा। सात नामुमकिन थे, उन्हें दोबारा लिखना पड़ा। असली काम यही है — मॉडल नहीं, उनके बीच का हिसाब।"
+  }
+}
