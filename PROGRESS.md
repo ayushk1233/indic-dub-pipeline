@@ -930,3 +930,41 @@
     bears on the fixed-roster question raised in step 66: recording each speaker once in Hindi
     would make the production path `hi -> hi`, where the duration arithmetic is self-consistent.
     Unverified until the next run.
+
+## Step 75 — Phase 4 (model choice) — check what the model actually said
+
+- Completed: added an intelligibility check to `colab/indicf5_check.py`. Every generated clip
+  is transcribed back with Whisper and aligned against the sentence it was given, reporting
+  character error rate together with the insertion and deletion rates it decomposes into. A
+  CONTENT section reports each arm and prints the worst inserted speech verbatim; the verdict
+  now states whether the winning arm is clean before discussing identity at all; `listen()`
+  flags clips inline and prints what the transcriber heard.
+- Verification: PASSED. The alignment was exercised against seven constructed cases. A matra
+  difference scores 0.018 and passes; gibberish appended, prepended and inserted mid-sentence
+  are all caught by the insertion rate at 0.418, 0.309 and 0.182; a sentence truncated to a
+  quarter is caught by the deletion rate at 0.564 and is not confused with the gibberish
+  cases. 110 tests green.
+- Deviations:
+  - The listener reported audible gibberish between the intended words on every `en_ref_25s`
+    clip — the arm that placed at 97% of scale, the best of any arm in the run. Speaker
+    similarity reads timbre, so nonsense in the right voice outscores clean speech in a
+    slightly wrong one. No identity metric can catch this, and the project had no content
+    check at all, so the highest number in the report was the least usable audio.
+  - The likely cause is specific and testable. F5-TTS generates `[ref_text + gen_text]` as one
+    continuation of the reference audio and strips the reference by length. On `en_ref_25s`
+    the model logged `Audio is over 15s, clipping short` and used 13.7s of audio while still
+    receiving the whole 25s transcript, so roughly eleven seconds of reference text had no
+    matching audio and got spoken. `hi_ref_10s`, where transcript and audio agree, was clean
+    by ear. The CONTENT section measures this rather than leaving it as an inference.
+  - A single error rate cannot do this job. Gibberish appended to an otherwise correct
+    sentence scores 0.31, which sits below any threshold loose enough to tolerate Whisper's
+    own Hindi error, so the first version of this check would have passed the broken arm.
+    Insertions and deletions are judged separately, which also separates the two failures:
+    extra speech the model invented against speech it never finished.
+  - Character rather than word error rate. Hindi word boundaries move under ASR — compounds
+    split, matras attach differently — so a word rate reports differences a listener would not
+    call errors.
+  - Whisper is loaded through transformers rather than faster-whisper. faster-whisper needs
+    ctranslate2, and this environment already required pinning numpy into a one-minor-version
+    window to keep transformers, numba and f5-tts from breaking each other. This adds no new
+    dependency.

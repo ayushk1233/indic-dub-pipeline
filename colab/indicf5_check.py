@@ -81,6 +81,28 @@ SEED = 0
 
 NATURAL_CPS_HI = 10.81
 
+# Transcribing the output back is the only check that sees content. Speaker
+# similarity reads timbre, so gibberish in the right voice scores *higher*
+# than clean speech in a slightly wrong one: the en_ref_25s arm placed at 97%
+# of scale, the best of any arm, while audibly speaking nonsense between the
+# intended words. Nothing in an identity metric can catch that.
+#
+# Through transformers rather than faster-whisper on purpose. faster-whisper
+# needs ctranslate2, and this environment already required pinning numpy into
+# a one-minor-version window to keep transformers, numba and f5-tts from
+# breaking each other. Whisper via transformers adds no new dependency at all.
+ASR_MODEL = "openai/whisper-large-v3-turbo"
+
+# What counts as broken rather than imperfect, as a fraction of the intended
+# length. A single error rate cannot do this job: gibberish appended to an
+# otherwise correct sentence scores about 0.31, which sits under any threshold
+# loose enough to tolerate Whisper's own Hindi error. Insertions and deletions
+# are therefore judged separately, which is also what distinguishes the two
+# failures — extra speech the model invented, against speech it never finished.
+MAX_EXTRA = 0.15
+MAX_MISSING = 0.25
+MAX_CER = 0.35
+
 # How many pieces to cut each real take into when measuring the ceiling.
 # A 50 to 60 second take gives roughly 18s, 10s, 6s and 4s pieces, which
 # brackets both the test sentences and real dubbing segments.
@@ -105,6 +127,121 @@ def section(title):
 
 def sentences(text, minimum=25):
     return [s.strip() for s in _SENTENCE_RE.split(text or "") if len(s.strip()) >= minimum]
+
+
+_PUNCT = re.compile(r"[.,!?;:\u0964\u0965\"'()\[\]{}—–-]")
+
+
+def normalize(text):
+    """
+    Strip what a transcript comparison should not be graded on.
+
+    Punctuation, case and whitespace differences are not the model saying the
+    wrong thing. Devanagari danda counts as punctuation.
+    """
+    return " ".join(_PUNCT.sub(" ", (text or "").lower()).split())
+
+
+def align(reference, hypothesis):
+    """
+    Levenshtein alignment returning substitutions, insertions and deletions.
+
+    The counts matter more than the distance here. Gibberish spoken between
+    the intended words is an insertion; a sentence cut off early is a
+    deletion; a mispronounced word is a substitution. A single error rate adds
+    them together and hides which one happened, and they have different
+    causes: insertions point at reference text the model had no audio for,
+    deletions at a duration estimate that ran out of room.
+    """
+    n, m = len(reference), len(hypothesis)
+
+    # cost, then (substitutions, insertions, deletions) carried alongside it.
+    row = [(j, (0, j, 0)) for j in range(m + 1)]
+
+    for i in range(1, n + 1):
+        previous, row = row, [(i, (0, 0, i))]
+
+        for j in range(1, m + 1):
+            same = reference[i - 1] == hypothesis[j - 1]
+
+            sub_cost, sub_counts = previous[j - 1]
+            if not same:
+                sub_cost += 1
+                s, ins, dels = sub_counts
+                sub_counts = (s + 1, ins, dels)
+
+            del_cost, del_counts = previous[j]
+            del_cost += 1
+            s, ins, dels = del_counts
+            del_counts = (s, ins, dels + 1)
+
+            ins_cost, ins_counts = row[j - 1]
+            ins_cost += 1
+            s, ins, dels = ins_counts
+            ins_counts = (s, ins + 1, dels)
+
+            row.append(min((sub_cost, sub_counts),
+                           (del_cost, del_counts),
+                           (ins_cost, ins_counts),
+                           key=lambda pair: pair[0]))
+
+    return row[m][1]
+
+
+def score_text(intended, heard):
+    """
+    How far the spoken content is from the text that was asked for.
+
+    Returns character error rate together with the insertion and deletion
+    rates it is made of, each relative to the intended length.
+    """
+    reference, hypothesis = normalize(intended), normalize(heard)
+
+    if not reference:
+        return {"cer": float("nan"), "extra": float("nan"),
+                "missing": float("nan")}
+
+    subs, insertions, deletions = align(reference, hypothesis)
+    length = len(reference)
+
+    return {
+        "cer": (subs + insertions + deletions) / length,
+        "extra": insertions / length,
+        "missing": deletions / length,
+    }
+
+
+def transcribe_outputs(rows):
+    """
+    Read every generated clip back and score it against the text asked for.
+
+    Loaded after synthesis so it never competes with the two TTS models for
+    GPU memory.
+    """
+    from transformers import pipeline
+
+    device = 0 if torch.cuda.is_available() else -1
+    asr = pipeline(
+        "automatic-speech-recognition",
+        model=ASR_MODEL,
+        device=device,
+        torch_dtype=torch.float16 if device == 0 else torch.float32,
+    )
+
+    for row in rows:
+        if not row.get("text"):
+            continue
+        try:
+            out = asr(str(row["path"]),
+                      generate_kwargs={"language": "hi", "task": "transcribe"})
+            row["heard"] = (out or {}).get("text", "").strip()
+            row.update(score_text(row["text"], row["heard"]))
+        except Exception as exc:
+            row["heard"] = f"<{type(exc).__name__}: {exc}>"
+            row.update({"cer": float("nan"), "extra": float("nan"),
+                        "missing": float("nan")})
+
+    return rows
 
 
 def _assert_materialized(model):
@@ -514,6 +651,61 @@ def main():
               f"{place:>9.0f}%{place_se:>6.0f}"
               f"{cps:>7.1f}{cps / NATURAL_CPS_HI:>8.2f}x{gen:>7.1f}s")
 
+    # --------------------------------------------------------------- content
+    # Free IndicF5 first: the ASR model is the third one this process loads.
+    indicf5 = None
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    section("CONTENT — does it say what it was asked to say?")
+    p("  Every clip transcribed back and compared to the sentence it was given.")
+    p("  This is the only check here that reads content. Speaker similarity")
+    p("  reads timbre, and gibberish in the right voice scores higher than")
+    p("  clean speech in a slightly wrong one.")
+    p("")
+    p("    extra    invented speech, as a fraction of the intended length")
+    p("    missing  speech never produced — a sentence that stopped early")
+    p("")
+
+    try:
+        transcribe_outputs(rows)
+    except Exception as exc:
+        p(f"  !! could not transcribe: {type(exc).__name__}: {exc}")
+
+    p(f"  {'model':<10}{'arm':<12}{'n':>3}{'cer':>7}{'extra':>8}{'missing':>9}"
+      f"{'bad':>5}")
+
+    content_table = {}
+    for model, model_arms in (("xtts", xtts_arms), ("indicf5", indicf5_arms)):
+        for arm, _, _, _, _ in model_arms:
+            items = [r for r in rows
+                     if r["model"] == model and r["arm"] == arm
+                     and np.isfinite(r.get("cer", float("nan")))]
+            if not items:
+                continue
+
+            mean = {k: float(np.mean([r[k] for r in items]))
+                    for k in ("cer", "extra", "missing")}
+            bad = [r for r in items
+                   if r["extra"] > MAX_EXTRA or r["missing"] > MAX_MISSING
+                   or r["cer"] > MAX_CER]
+            content_table[(model, arm)] = (mean, len(bad), len(items))
+
+            p(f"  {model:<10}{arm:<12}{len(items):>3}{mean['cer']:>7.3f}"
+              f"{mean['extra']:>8.3f}{mean['missing']:>9.3f}"
+              f"{len(bad):>4}/{len(items)}")
+
+    worst = sorted((r for r in rows if np.isfinite(r.get("extra", float("nan")))),
+                   key=lambda r: -r["extra"])[:3]
+    if worst and worst[0]["extra"] > MAX_EXTRA:
+        p("")
+        p("  Worst inserted speech — what was asked for, then what came out:")
+        for row in worst:
+            p(f"    {row['model']} {row['arm']} [{row['index']}] "
+              f"extra {row['extra']:.2f}")
+            p(f"      asked: {row['text'][:70]}")
+            p(f"      heard: {row.get('heard', '')[:70]}")
+
     section("PACE — is the generated audio the right length?")
     p("  IndicF5 sets generated duration from a byte ratio:")
     p("      gen_seconds  =  ref_seconds x gen_bytes / ref_bytes")
@@ -614,6 +806,23 @@ def main():
         p(f"    difference {gap:+.3f}, combined standard error {noise:.3f}")
         p("")
 
+        clean = {}
+        for key, (mean, bad, total) in content_table.items():
+            clean[key] = bad == 0
+
+        for key in (("xtts", "en_ref"), ("indicf5", "en_ref_10s"),
+                    ("indicf5", "hi_ref_10s"), ("indicf5", "en_ref_25s")):
+            if key in content_table:
+                mean, bad, total = content_table[key]
+                state = "clean" if bad == 0 else f"{bad}/{total} clips broken"
+                p(f"    content, {key[0]} {key[1]:<12} {state}")
+        p("")
+
+        if not clean.get(("indicf5", "en_ref_10s"), True):
+            p("  Note: the winning arm does not say what it was asked to say.")
+            p("  Identity is not the binding constraint while that is true.")
+            p("")
+
         if abs(gap) < noise:
             p("  The two models are indistinguishable on identity at this sample")
             p("  size. That settles it in IndicF5's favour anyway: it is MIT and")
@@ -705,12 +914,30 @@ def listen(rows=None, arms=None, indexes=None):
             if isinstance(place, float) and np.isfinite(place):
                 bits.append(f"{place:.0f}% of scale")
 
+            extra, missing = row.get("extra"), row.get("missing")
+            if isinstance(extra, float) and np.isfinite(extra):
+                bits.append(f"extra {extra:.2f}")
+                if extra > MAX_EXTRA:
+                    bits.append("<b>GIBBERISH</b>")
+            if isinstance(missing, float) and np.isfinite(missing):
+                if missing > MAX_MISSING:
+                    bits.append(f"<b>CUT SHORT {missing:.2f}</b>")
+
             display(HTML(
                 f"<div style='margin-top:10px'><b>{row['model']} &middot; "
                 f"{row['arm']}</b> <span style='color:#666'>&mdash; "
                 f"{', '.join(bits)}</span></div>"
             ))
             display(Audio(filename=str(row["path"])))
+
+            # What the transcriber heard, so a bad clip can be read as well as
+            # listened to. Shown only when it differs enough to be worth it.
+            heard = row.get("heard")
+            if heard and isinstance(row.get("cer"), float) and row["cer"] > 0.05:
+                display(HTML(
+                    f"<div style='color:#a33;font-size:13px;margin:2px 0 0 12px'>"
+                    f"heard: {heard}</div>"
+                ))
 
 
 if __name__ == "__main__":
