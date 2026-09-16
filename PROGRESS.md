@@ -798,3 +798,26 @@
     kernels: `/content` survives a restart, so XTTS can synthesize and save its anchors,
     IndicF5 can synthesize into the same directory after a restart, and a third pass on the
     XTTS stack can score everything together.
+
+## Step 71 — Phase 4 (model choice) — narrow the numpy pin to the only window that exists
+
+- Completed: changed the Colab numpy pin from `>=2.1,<3` to `>=2.1,<2.3`, and trimmed the
+  setup cell's `pip check` to the packages that gate the run.
+- Verification: PASSED by diagnosis. The wider pin resolved to numpy 2.5.3, which fixed
+  transformers but broke the next link in the chain: `import TTS` failed with
+  `Numba needs NumPy 2.2 or less. Got NumPy 2.5`. Numba arrives through librosa and enforces
+  its ceiling at import rather than at install.
+- Deviations:
+  - Three packages constrain numpy in opposite directions: transformers 4.57 needs >= 2.0,
+    numba needs < 2.3, and f5-tts declares <= 1.26.4. The first two leave exactly
+    2.1 <= numpy < 2.3; f5-tts cannot be satisfied alongside them at all. Its declaration is
+    deliberately overridden rather than honoured, so pip prints an f5-tts conflict on every
+    install and that line is expected output. Whether the pin reflects a real incompatibility
+    or an inherited ceiling is now an empirical question, and running IndicF5 on numpy 2.2 is
+    what answers it.
+  - Colab's own `pip check` output runs to roughly forty lines about preinstalled packages
+    that have nothing to do with this pipeline, which buried the one line that mattered on the
+    first attempt. The setup cell now greps it down to numpy, numba, transformers and tts.
+  - If IndicF5 does fail on numpy 2.2, the fallback is separate kernels rather than a
+    resolvable environment: `/content` survives a restart, so each model can synthesize in an
+    environment built for it and a final pass on the XTTS stack can score both sets together.

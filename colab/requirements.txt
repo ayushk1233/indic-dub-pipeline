@@ -26,13 +26,24 @@ soundfile
 librosa>=0.10.0
 einops
 
-# numpy>=2 is not optional, and nothing here declares it loudly enough on its
-# own. transformers 4.57 touches numpy.dtypes.StringDType, which arrived in
-# numpy 2.0. Installing IndicF5 pulls numpy back to 1.x, and the failure is
-# invisible: transformers' lazy loader catches the AttributeError and quietly
-# drops every torch-backed class from its namespace, so `import transformers`
-# succeeds, `transformers.__version__` prints a version inside this file's own
-# pin, and `from transformers import GPT2PreTrainedModel` fails three layers
-# downstream inside coqui-tts. Pin it here, and install this file *after*
-# IndicF5 so these constraints are the ones that win.
-numpy>=2.1,<3
+# numpy is squeezed from three sides here and the window is narrow.
+#
+#   transformers 4.57  needs >= 2.0   — it touches numpy.dtypes.StringDType
+#   numba (via librosa) needs < 2.3   — hard version check, refuses at import
+#   f5-tts 0.1.0       declares <= 1.26.4
+#
+# The first two leave exactly 2.1 <= numpy < 2.3. f5-tts cannot be satisfied
+# alongside them at all, so its declaration is deliberately overridden: pip
+# will print a conflict for it on every install and that is expected, not a
+# failure. Its pin is a ceiling inherited from an older scientific stack
+# rather than a measured incompatibility, and IndicF5 is exercised on numpy
+# 2.2 to find out whether it is real.
+#
+# Getting this wrong is expensive to debug, because numpy 1.x breaks
+# transformers *silently*: the lazy loader catches the AttributeError raised
+# while building its torch-backed classes and drops those names, so
+# `import transformers` succeeds, the version string looks right, and the only
+# symptom is a missing GPT2PreTrainedModel reported from inside coqui-tts.
+#
+# Install this file *after* IndicF5 so these constraints are the surviving ones.
+numpy>=2.1,<2.3
