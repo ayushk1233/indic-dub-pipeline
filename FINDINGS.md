@@ -327,6 +327,42 @@ on.
 
 ---
 
+## 7b. The prefix is punctuation in the reference transcript
+
+Measured 2026-09-17, seven sentences, English reference, corrected duration, single chunk.
+
+| reference transcript | clips with a prefix | extra | cer |
+|---|---|---|---|
+| `So let me tell you what this project actually does. You get a video, lecture and...` | 1 of 7 | 0.049 | 0.114 |
+| `so let me tell you what this project actually does you get a video lecture and...` | **0 of 7** | 0.037 | 0.108 |
+
+Lowercasing and removing punctuation from the reference transcript removes the prefix. Nothing
+else changed: same clip, same sentences, same corrected duration, same seed.
+
+**This was found by accident and the first report of it was wrong.** The second arm was labelled
+`en_deva` and was supposed to be Devanagari — Whisper's `language` argument is a hint, not a
+constraint, and asked to read ten seconds of English "in Hindi" it returned English in Roman
+letters. The verdict named script. 132 Latin characters and 132 Devanagari characters are
+indistinguishable in a report; the byte counts are not, and are now printed for every variant,
+with any arm under 80% Devanagari dropped rather than run under that name.
+
+The mechanism is consistent with everything else here. `infer_batch_process` hands the model
+`ref_text + gen_text` as one sequence and strips exactly `ref_audio_len` frames with no alignment
+check behind the slice. Punctuation the speaker did not pause for is text the model has to place
+somewhere, and what it cannot fit inside the conditioned frames is spoken at the start of the kept
+region — which is where `पेंट केगे उसे` came from.
+
+**Consequence: IndicXlit stays out of the pipeline.** Transliterating the reference transcript was
+the fallback if punctuation had not been the cause. It is not needed, and the fix is one call to
+the normaliser that already exists for scoring.
+
+**Strength of evidence.** One flagged clip going to zero is thin on its own. It is corroborated
+by `extra` and `cer` improving across all seven clips rather than only the flagged one, and it is
+worth acting on regardless because stripping punctuation costs nothing and removes text the model
+demonstrably cannot place.
+
+---
+
 ## 8. Standing conclusion
 
 **Superseded 2026-09-17.** The previous conclusion was that `indicf5 hi_ref_10s` is the only

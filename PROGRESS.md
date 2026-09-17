@@ -1332,3 +1332,33 @@ probe.
   - The verdict now states the evidence is thin. One flagged clip in seven going to zero is
     suggestive and not established. It is still worth acting on, because stripping punctuation
     costs nothing — but the report says which of those two things it is.
+
+## Step 87 — Phase 4 (model choice) — punctuation, and the probe that is no longer needed
+
+The mislabelled arm from step 86 already answered the question step 86's rewrite was built to
+ask. `en_deva` was depunctuated English, not Devanagari, and it took the prefix from one flagged
+clip in seven to zero with `extra` 0.049 to 0.037 and `cer` 0.114 to 0.108 across all seven.
+
+So the fix is to strip punctuation and case from the reference transcript, and **IndicXlit does
+not enter the pipeline**. The three-variant probe would reproduce `en_plain` — same seed, same
+text, known result — and add a script arm that is only needed if punctuation had not been the
+cause. Not running it.
+
+The mechanism is consistent with the rest: `infer_batch_process` hands the model
+`ref_text + gen_text` as one sequence and strips exactly `ref_audio_len` frames with no alignment
+check. Punctuation the speaker did not pause for is text the model must place somewhere, and what
+does not fit inside the conditioned frames is spoken at the start of the kept region.
+
+**Verification:** `/kaggle/working/indicf5_probe.txt`, 14 clips, transcribe-back scored, with the
+byte counts in the report showing both transcripts were Latin.
+
+**Deviations:**
+  - The rewritten `probe()` is kept rather than deleted. It is correct now, it carries the script
+    guard that would have caught this, and the script question returns if a future reference clip
+    behaves differently. It is simply not on the critical path.
+  - One flagged clip going to zero is thin evidence and `FINDINGS.md` says so. It is acted on
+    because the change costs nothing, not because the sample settles it — and because `extra` and
+    `cer` improved on all seven clips rather than only the flagged one, which is weak
+    corroboration across a wider sample than the flag itself.
+  - Deferred: the 25s reference transcript truncation is still open and still separate. The
+    shipping configuration keeps references under 15s, which avoids it entirely.
