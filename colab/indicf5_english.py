@@ -66,6 +66,7 @@ from colab import workspace
 from colab.english_report import cosine
 from colab.indicf5_check import (
     ASR_MODEL,
+    _PUNCT,
     FIXTURES,
     MAX_CER,
     MAX_EXTRA,
@@ -125,6 +126,51 @@ def mean(rows, key):
     values = [r.get(key, np.nan) for r in rows]
     values = [v for v in values if v is not None and np.isfinite(v)]
     return float(np.mean(values)) if values else float("nan")
+
+
+DEVANAGARI = range(0x0900, 0x0980)
+
+
+def devanagari_fraction(text):
+    """
+    How much of a string is actually in the script it is supposed to be in.
+
+    Whisper's language argument is a hint, not a constraint. Asked to read ten
+    seconds of English "in Hindi" it returned English in Roman script, and the
+    arm built on that transcript was labelled `en_deva` and reported as a test
+    of script while differing from its control only in punctuation. Nothing in
+    the run could tell, because 132 Latin characters and 132 Devanagari
+    characters look the same until you count the bytes.
+    """
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return 0.0
+    return sum(ord(c) in DEVANAGARI for c in letters) / len(letters)
+
+
+def plain(text):
+    """The same words with the punctuation and capitalisation taken off."""
+    return " ".join(_PUNCT.sub(" ", (text or "").lower()).split())
+
+
+def transliterate(text):
+    """
+    Latin to Devanagari with IndicXlit, from the same lab as IndicF5.
+
+    Not sanscript/ITRANS, which reads its input as a transliteration scheme
+    rather than as English and renders "tell you" as तेल्ल् योउ. A null result
+    from that could not be told apart from a bad transliteration.
+    """
+    try:
+        from ai4bharat.transliteration import XlitEngine
+    except ImportError:
+        return None
+
+    engine = XlitEngine("hi", beam_width=4, src_script_type="en")
+    out = engine.translit_sentence(plain(text), lang_code="hi")
+    if isinstance(out, dict):
+        out = out.get("hi", "")
+    return (out or "").strip() or None
 
 
 def hear(path, language):
@@ -366,6 +412,210 @@ def main(sentence_count=7):
 
     REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
     print(f"\nwrote {REPORT}")
+    return rows
+
+
+def listen(rows, arms=None, indexes=None):
+    from IPython.display import Audio, display
+
+    order = [a for a, *_ in ARMS]
+    picked = [r for r in rows
+              if (arms is None or r["arm"] in arms)
+              and (indexes is None or r["index"] in indexes)]
+
+    for index in sorted({r["index"] for r in picked}):
+        group = sorted([r for r in picked if r["index"] == index],
+                       key=lambda r: order.index(r["arm"]))
+        for row in group:
+            notes = []
+            if row.get("asr_looped"):
+                notes.append("UNREADABLE (ASR looped)")
+            if row.get("lead", 0) > MAX_LEAD:
+                notes.append(f"PREFIX {row.get('lead_chars', 0)} chars")
+            if row.get("extra", 0) > MAX_EXTRA:
+                notes.append("GIBBERISH")
+            if row.get("missing", 0) > MAX_MISSING:
+                notes.append("CUT SHORT")
+            # Substituted gibberish is the one failure the positional checks
+            # cannot see. "Seven were impossible, and we had to rewrite them."
+            # came back as "Sraindari ansu alwe atcho rureshi chong." — right
+            # length, right rhythm, no inserted or missing span anywhere, and
+            # not one correct word. Only the error rate catches that.
+            if row.get("cer", 0) > MAX_CER:
+                notes.append("MANGLED")
+            print(f"\n{row['arm']}  [{index}]  {row['actual_s']:.2f}s  "
+                  f"{row['actual_s'] / row['natural_s']:.2f}x natural  "
+                  f"sim {row['sim']:.3f}  {row['pos']:.0f}%"
+                  + ("   " + "  ".join(notes) if notes else ""))
+            print(f"  asked: {row['text']}")
+            heard = row.get("heard") or ""
+            if row.get("asr_looped"):
+                print(f"  heard: {heard[:160]}...  [{len(heard)} chars from a "
+                      f"{row['actual_s']:.1f}s clip]")
+            elif heard and row.get("cer", 0) > 0.05:
+                print(f"  heard: {heard}"
+                      + (f"   [cer {row['cer']:.2f}]"
+                         if row.get("cer", 0) > MAX_CER else ""))
+            display(Audio(str(row["path"])))
+
+
+def probe(sentence_count=7):
+    """
+    What about the reference transcript causes the prefix?
+
+    Three variants of the same transcript for the same ten seconds of English
+    audio, each one step from the last, so a difference can be attributed:
+
+        en_latin   the transcript as the ASR stage produces it, with
+                   punctuation and capitalisation. The baseline, and the
+                   configuration that leaves a prefix on one clip in seven.
+        en_plain   the same words, lower case, punctuation removed.
+        en_deva    those words transliterated into Devanagari with IndicXlit.
+
+    latin against plain isolates punctuation. plain against deva isolates
+    script, with punctuation already gone from both, which is the comparison
+    the first attempt at this probe believed it was making and was not:
+    Whisper's language argument is a hint, and asked to read English "in Hindi"
+    it returned English in Roman script. The arm was labelled deva, differed
+    from its control only in punctuation, and the verdict named script. Nothing
+    in the run could tell — 132 Latin characters and 132 Devanagari characters
+    look identical until the bytes are counted, which is now done and printed.
+
+    No XTTS and no calibration. The prefix is a content failure and identity
+    has already been measured.
+
+        rows = eng.probe()
+        eng.listen(rows, indexes=(1,))
+    """
+    _lines.clear()
+    OUT.mkdir(parents=True, exist_ok=True)
+    scripted = json.loads((FIXTURES / "scripted_text.json").read_text(encoding="utf-8"))
+    transcripts = json.loads((FIXTURES / "reference_text.json").read_text(encoding="utf-8"))
+    hindi = sentences(scripted["hi"])[:sentence_count]
+
+    reference = FIXTURES / "english_reference_short.wav"
+    latin = transcripts["english_short"]["text"]
+
+    section("REFERENCE TRANSCRIPTS")
+    variants = [("en_latin", latin), ("en_plain", plain(latin))]
+
+    deva = transliterate(latin)
+    if deva is None:
+        p("  !! IndicXlit is not installed, so the script arm cannot run:")
+        p("     pip install -q ai4bharat-transliteration")
+        p("     Without it this probe tests punctuation only, which is worth")
+        p("     knowing but is not the question it was written for.")
+    elif devanagari_fraction(deva) < 0.8:
+        p(f"  !! the transliteration came back {devanagari_fraction(deva):.0%} "
+          "Devanagari, which is not a script arm. Dropped rather than run")
+        p(f"     and mislabelled: {deva[:80]!r}")
+        deva = None
+    else:
+        variants.append(("en_deva", deva))
+
+    for name, text in variants:
+        p(f"\n  {name:<9} {len(text):>4} chars, {len(text.encode('utf-8')):>4} bytes, "
+          f"{devanagari_fraction(text):.0%} Devanagari")
+        p(f"            {text}")
+    p("")
+    p("  Bytes against characters is the check that matters. One byte per")
+    p("  character is Latin whatever the arm is called.")
+
+    install_patches()
+    model = load_indicf5()
+
+    rows = []
+    for arm, transcript in variants:
+        p(f"\n--- {arm}")
+        for index, sentence in enumerate(hindi):
+            _mode["speed"] = "auto"
+            _mode["one_chunk"] = True
+            torch.manual_seed(SEED)
+            try:
+                audio = model(sentence, ref_audio_path=str(reference),
+                              ref_text=transcript)
+            except Exception as exc:
+                p(f"    [{index}] FAILED {type(exc).__name__}: {exc}")
+                continue
+
+            wave = as_float_wave(audio)
+            path = OUT / arm / f"{index:02d}.wav"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(str(path), wave, SAMPLE_RATE, subtype="PCM_16")
+
+            rows.append({
+                "arm": arm, "index": index, "text": sentence, "path": path,
+                "language": "hi", "actual_s": len(wave) / SAMPLE_RATE,
+                "natural_s": len(sentence) / NATURAL_CPS_HI,
+                "sim": float("nan"), "pos": float("nan"),
+            })
+            p(f"    [{index}] {rows[-1]['actual_s']:5.2f}s")
+
+    if not rows:
+        return rows
+
+    del model
+    torch.cuda.empty_cache()
+    transcribe_outputs(rows)
+
+    section("PREFIX, BY REFERENCE TRANSCRIPT")
+    p(f"{'arm':<10}{'clips':>7}{'with prefix':>13}{'worst':>9}{'mean lead':>11}"
+      f"{'extra':>8}{'cer':>7}")
+    p("")
+    flagged = {}
+    for arm, _ in variants:
+        items = [r for r in rows if r["arm"] == arm]
+        if not items:
+            continue
+        bad = [r for r in items if r.get("lead", 0) > MAX_LEAD]
+        worst = max(items, key=lambda r: r.get("lead_chars", 0))
+        flagged[arm] = len(bad)
+        p(f"{arm:<10}{len(items):>7}{len(bad):>13}"
+          f"{worst.get('lead_chars', 0):>6} ch{mean(items, 'lead'):>11.3f}"
+          f"{mean(items, 'extra'):>8.3f}{mean(items, 'cer'):>7.3f}")
+        if worst.get("lead_chars"):
+            p(f"          [{worst['index']}] opens with "
+              f"{(worst.get('heard') or '')[:worst['lead_chars']]!r}")
+
+    section("VERDICT")
+    base = flagged.get("en_latin")
+    no_punct = flagged.get("en_plain")
+    script = flagged.get("en_deva")
+
+    p(f"  punctuation   en_latin {base} -> en_plain {no_punct}")
+    if script is None:
+        p("  script        not tested")
+    else:
+        p(f"  script        en_plain {no_punct} -> en_deva {script}")
+    p("")
+
+    if base and no_punct == 0:
+        p("  Punctuation in the reference transcript is what the model cannot")
+        p("  reconcile with the audio. Stripping it is free, needs no")
+        p("  transliteration, and the ASR stage can emit it either way.")
+        if script == 0:
+            p("  The script arm adds nothing on top, so Devanagari is not")
+            p("  required and IndicXlit stays out of the pipeline.")
+        elif script:
+            p("  Transliterating on top makes it worse, so do not.")
+    elif base and no_punct and script == 0:
+        p("  Script is the cause and punctuation is not. The reference")
+        p("  transcript has to be transliterated into the target script, which")
+        p("  puts IndicXlit in the pipeline.")
+    elif base and no_punct == base:
+        p("  Neither changes it. The transcript is not the cause and the")
+        p("  reference audio is what is left. Shorten it and re-measure.")
+    else:
+        p("  No clean reading. One flagged clip in the baseline is thin")
+        p("  evidence either way — raise sentence_count before concluding.")
+
+    p("")
+    p(f"  Baseline had {base} flagged clip(s) of {sentence_count}. A change")
+    p("  from one to zero is suggestive, not established. What makes it worth")
+    p("  acting on anyway is that stripping punctuation costs nothing.")
+
+    PROBE_REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
+    print(f"\nwrote {PROBE_REPORT}")
     return rows
 
 

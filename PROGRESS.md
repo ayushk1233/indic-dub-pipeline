@@ -1298,3 +1298,37 @@ Every output path was `/content`, which exists on Colab and nowhere else. Added
     filesystem side effect makes the test suite depend on import order.
   - The directory is still named `colab/`. Renaming it would touch every import in the project
     and the notebook, for no behavioural gain, and Colab remains a supported host.
+
+## Step 86 — Phase 4 (model choice) — the probe tested punctuation and called it script
+
+The first probe reported that the script of the reference transcript caused the prefix. It had
+not changed the script. Whisper's `language` argument is a hint, not a constraint, and asked to
+read ten seconds of English "in Hindi" it returned English in Roman letters — 132 characters in
+132 bytes. The arm was labelled `en_deva`, differed from its control only in punctuation and
+capitalisation, and the verdict named script. Nothing in the run could tell, because 132 Latin
+characters and 132 Devanagari characters are indistinguishable in a report.
+
+The measurement itself stands and is worth having: stripping punctuation from the reference
+transcript took the prefix from one flagged clip in seven to zero, with `extra` 0.049 to 0.037
+and `cer` 0.114 to 0.108. The attribution was wrong, not the numbers.
+
+Rewrote `probe()` with three variants a single step apart — `en_latin`, `en_plain`, `en_deva` —
+so punctuation and script are separated rather than confounded. Devanagari now comes from
+IndicXlit rather than from Whisper, and `devanagari_fraction()` gates the arm: a transcript that
+is not at least 80% Devanagari is dropped rather than run under that name. The report prints
+characters against bytes for every variant.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 158 passed, 9 of them new in
+`tests/test_reference_transcript.py`, including the exact Whisper output that fooled the first
+probe.
+
+**Deviations:**
+  - IndicXlit is optional. If it is absent the script arm is skipped and the report says the
+    probe is testing punctuation only, rather than substituting something and carrying on. That
+    is the failure this step exists to correct.
+  - Transliteration uses IndicXlit rather than sanscript/ITRANS. ITRANS reads its input as a
+    transliteration scheme instead of as English and renders "tell you" as तेल्ल् योउ, so a null
+    result could not be told apart from a bad transliteration.
+  - The verdict now states the evidence is thin. One flagged clip in seven going to zero is
+    suggestive and not established. It is still worth acting on, because stripping punctuation
+    costs nothing — but the report says which of those two things it is.
