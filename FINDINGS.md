@@ -223,10 +223,18 @@ were cleanly separated rather than confounded.
 **Duration over-allocation is the cause.** Correcting it alone takes an English reference from four
 bad clips out of seven to none, and to the same content quality as the Hindi-reference arm.
 
-**Chunking is not a cause — it is mildly protective.** Forcing a single chunk while leaving the
-duration wrong made things *worse*, 6 bad clips against 4, because each chunk re-anchors on the
-reference and a split sentence gives the model fewer consecutive seconds of surplus to fill. The
-correlation is negative. My prior that the cross-fade seam was being heard was wrong.
+**Chunking is a consequence of the same fault, not an independent one.** `max_chars` exists to keep
+`reference + generated` inside F5-TTS's 25 s training window. With the duration wrong, the longest
+sentence asked for 27.8 s of generation on top of a 10.3 s reference — 38 s, half again past the
+window the model was ever trained on, which is why `en10_one` was the worst arm of the six. With
+the duration corrected, the same sentence needs 13.4 s and totals 23.7 s, so **no split is required
+at all** and the cross-fade seam disappears with it. `en10_both` is the correct configuration, not
+`en10_speed`.
+
+This was corrected by ear after the run. The metric could not separate them — extra 0.037 against
+0.049 — but on the 134-character sentence `en10_speed` splits into two chunks at roughly 5.9 s, and
+that is exactly where a listener reports gibberish in the 4–6 s region of an otherwise clean clip.
+A 0.15 s seam is far too short to move a character error rate.
 
 Two details that confirm the mechanism rather than merely fitting it:
 
@@ -235,6 +243,28 @@ Two details that confirm the mechanism rather than merely fitting it:
 - **Short sentences suffer most.** At `en10_base` the 42–52 character sentences scored extra 1.10,
   1.02 and 0.76, while the 115–145 character ones scored 0.02–0.16 — those were the ones chunking
   happened to split. Real dubbing segments are short, so this is the worst possible distribution.
+
+### The content check has a blind spot: Whisper is a fluency prior
+
+On `en10_base` the 134-character sentence scores extra 0.04 — apparently clean — and is audibly
+full of gibberish. The transcribe-back check catches invented **words**; it does not catch invented
+**sound**. Whisper is trained to emit fluent text and discards non-lexical babble rather than
+transcribing it, so garbled audio can round-trip to a clean transcript. On the short sentences the
+babble happened to be lexical enough to transcribe (`वीर्ड उदे एंस पसे एड़ शे एंड़...`, extra 1.10)
+and the check fired; on the long ones it did not.
+
+**What caught it instead was pace.** That clip reads `got/natural = 2.11`. Because the model fills
+exactly the slot it is given, a pace ratio away from 1.0 is itself a content-integrity signal, and
+on this arm it was the reliable one. Neither check is sufficient alone:
+
+| failure | caught by `extra` | caught by pace |
+|---|---|---|
+| invented words | yes | sometimes |
+| non-lexical babble filling a slot | **no** | yes |
+| cross-fade seam at a chunk boundary | no | no |
+
+The seam has no automatic detector yet. The fix is to remove the seam rather than measure it — with
+the duration corrected, nothing needs splitting.
 
 The four clips whose conditions were untouched between `en10_base` and `en10_one` returned
 byte-identical scores, which is the control on the experiment itself.

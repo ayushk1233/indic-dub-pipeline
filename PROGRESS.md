@@ -1068,3 +1068,35 @@ decimals in all six arms, so the model fills exactly the slot it is given rather
   - `FINDINGS.md` section 8 is marked superseded rather than rewritten. The conclusion that
     production would have to record every speaker in Hindi was a consequence of this fault, not
     of the model, and the reasoning that led there is worth keeping visible.
+
+## Step 79 — Phase 4 (model choice) — the ear corrects the chunking conclusion
+
+Listening feedback on the step 78 clips revised two things.
+
+Chunking is not an independent fault and is not protective. `max_chars` exists to hold
+`reference + generated` inside F5-TTS's 25s training window. With the duration wrong, the
+longest sentence asked for 27.8s of generation on a 10.3s reference — 38s, half again past the
+window — which is why `en10_one` was the worst of the six arms. With the duration corrected the
+same sentence needs 13.4s and totals 23.7s, so no split is required and the cross-fade seam goes
+with it. `en10_both`, not `en10_speed`, is the correct configuration. Reported residual gibberish
+in the 4–6s region of `en10_speed`'s 134-character clip coincides with its chunk boundary at
+roughly 5.9s.
+
+The transcribe-back check has a blind spot. The same clip scores extra 0.04 on `en10_base` and is
+audibly full of gibberish: Whisper is a fluency prior and discards non-lexical babble instead of
+transcribing it, so garbled audio can round-trip clean. What caught that clip was pace,
+`got/natural = 2.11`. Because the model fills exactly the slot it is handed, pace deviation is
+itself a content-integrity signal, and the two checks cover different failures.
+
+**Verification:** listening pass over all 42 clips from `/content/indicf5_diagnose`, against the
+per-clip table in `/content/indicf5_diagnose.txt`.
+
+**Deviations:**
+  - Recorded as a correction to step 78 rather than a rewrite. Step 78's measurement stands; its
+    interpretation of the chunking arm was wrong, and both readings are kept so the reasoning is
+    auditable.
+  - The seam has no automatic detector and is not getting one. It is 0.15s, far too short to move
+    a character error rate, and with the duration corrected nothing needs splitting — removing
+    the cause is cheaper than measuring the symptom.
+  - IndicF5 has never been run English-to-English. XTTS was, in the four-arm run, at 0.502 raw
+    and 47% of scale. Noted as an open question, not scheduled.
