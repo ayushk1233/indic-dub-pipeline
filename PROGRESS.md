@@ -1100,3 +1100,39 @@ per-clip table in `/content/indicf5_diagnose.txt`.
     the cause is cheaper than measuring the symptom.
   - IndicF5 has never been run English-to-English. XTTS was, in the four-arm run, at 0.502 raw
     and 47% of scale. Noted as an open question, not scheduled.
+
+## Step 80 — Phase 4 (model choice) — the babble is the reference transcript, not the sentence
+
+`en10_both` is a single chunk at a correct duration and still opens with roughly three seconds of
+invented speech before the intended sentence. That rules out both mechanisms found so far, and
+rules out the chunk seam proposed in step 79, which was wrong.
+
+The residue identifies itself. Transcribed back it reads as garbled English — `एंड़` for "and",
+`शे` for "speech" — so it is the reference transcript being spoken, not the sentence asked for.
+`infer_batch_process` conditions on the reference audio, hands the model `ref_text + gen_text` as
+one sequence, and strips exactly `ref_audio_len` frames off the front with no alignment check
+behind the slice. If the model cannot align the reference transcript to the reference audio, the
+remainder is spoken at the start of the kept region.
+
+Added `colab/vocab_check.py`, which checks whether IndicF5 has vocabulary entries for the English
+transcript at all. It runs in two seconds with no GPU and is therefore the right test to run
+before any further synthesis.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 120 passed. The check itself cannot be
+run locally; IndicF5's repository is gated and its vocabulary only exists in the Colab cache.
+
+**Deviations:**
+  - No synthesis arm scheduled yet. A vocabulary gap and a script-handling weakness predict the
+    same symptom, and one of them is free to test while the other costs a GPU run. If coverage
+    is complete the indicated next test is an English clip whose transcript is transliterated
+    into Devanagari, which holds the audio fixed and moves only the script.
+  - The transcribe-back threshold is too loose for this failure and is left unchanged for now.
+    The prefix scored extra 0.12 against a 0.15 threshold, so the check saw it and did not
+    report it. Thirteen invented characters spread across a sentence would be tolerable; three
+    contiguous seconds at the start are not. The alignment already distinguishes insertions, so
+    the fix is to flag the longest contiguous insertion run rather than the total — deferred
+    until the cause is settled, because a detector tuned against an unexplained symptom tends to
+    encode the symptom.
+  - Step 79's chunk-seam explanation is retracted. It was consistent with the timing the listener
+    reported but did not survive the single-chunk arm. Chunking is now settled as irrelevant to
+    content: it neither causes the babble nor prevents it.
