@@ -1238,3 +1238,34 @@ No XTTS, no calibration, no identity scoring.
   - Deferred: the run that produced these numbers predates the `en_deva` arm and the loop guard,
     so its English content columns are artifacts of Whisper's repetition and its
     "en_en carries the prefix too" verdict is void. Not re-run, because nothing depends on it.
+
+## Step 84 — Phase 4 (model choice) — English is out, and cer is not redundant
+
+Listening pass over all 21 clips. English-to-English is not accented English, it is not English:
+"Seven were impossible, and we had to rewrite them." came back as "Sraindari ansu alwe atcho
+rureshi chong." IndicF5 declares eleven Indian languages and English is not among them. The
+question is closed and the model is not a candidate for English output.
+
+English-to-Hindi and Hindi-to-Hindi were both judged good by ear, which closes the model choice:
+a 10s English reference with the duration corrected, scoring 0.768 at 93% of scale against the
+Hindi reference's 0.785 at 86%, 0.7 standard errors apart.
+
+Added a `MANGLED` flag to `listen()`. Clip [6] of the English arm was pure gibberish and carried
+no flag at all: right length, right rhythm, no inserted span, no missing span, no prefix, and not
+one correct word. Every positional check passes on a substitution-only failure and only the
+character error rate sees it — but `listen()` was not surfacing it.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 143 passed.
+
+**Deviations:**
+  - The English arm scored 0.754 at 84% of scale, with one clip at 0.851 and 91% — higher than
+    anything the working Hindi arms produced. That is the third time in this project that the
+    best-looking number came from broken audio, so `FINDINGS.md` now carries it as a rule rather
+    than an anecdote: identity is never reported before content has been shown clean.
+  - `cer` is kept alongside `extra`, `missing` and `lead` rather than folded into them. The four
+    catch different failures and none subsumes another; the substitution case is invisible to
+    the three positional ones.
+  - Deferred: the 14-character prefix on one clip in seven. `probe()` decides whether it is the
+    reference transcript's script, which is a pipeline design question — where the reference
+    transcript comes from — and is worth answering before the TTS backend is written rather
+    than after.

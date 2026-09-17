@@ -66,6 +66,7 @@ from colab.english_report import cosine
 from colab.indicf5_check import (
     ASR_MODEL,
     FIXTURES,
+    MAX_CER,
     MAX_EXTRA,
     MAX_MISSING,
     NATURAL_CPS_HI,
@@ -386,6 +387,13 @@ def listen(rows, arms=None, indexes=None):
                 notes.append("GIBBERISH")
             if row.get("missing", 0) > MAX_MISSING:
                 notes.append("CUT SHORT")
+            # Substituted gibberish is the one failure the positional checks
+            # cannot see. "Seven were impossible, and we had to rewrite them."
+            # came back as "Sraindari ansu alwe atcho rureshi chong." — right
+            # length, right rhythm, no inserted or missing span anywhere, and
+            # not one correct word. Only the error rate catches that.
+            if row.get("cer", 0) > MAX_CER:
+                notes.append("MANGLED")
             print(f"\n{row['arm']}  [{index}]  {row['actual_s']:.2f}s  "
                   f"{row['actual_s'] / row['natural_s']:.2f}x natural  "
                   f"sim {row['sim']:.3f}  {row['pos']:.0f}%"
@@ -396,7 +404,9 @@ def listen(rows, arms=None, indexes=None):
                 print(f"  heard: {heard[:160]}...  [{len(heard)} chars from a "
                       f"{row['actual_s']:.1f}s clip]")
             elif heard and row.get("cer", 0) > 0.05:
-                print(f"  heard: {heard}")
+                print(f"  heard: {heard}"
+                      + (f"   [cer {row['cer']:.2f}]"
+                         if row.get("cer", 0) > MAX_CER else ""))
             display(Audio(str(row["path"])))
 
 

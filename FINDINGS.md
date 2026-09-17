@@ -151,6 +151,46 @@ cases, including a matra difference at 0.018 and a truncation at 0.564.
 
 ---
 
+## 6b. IndicF5 cannot generate English, and the encoder does not care
+
+Measured 2026-09-17, seven sentences, English reference, English output. IndicF5 declares eleven
+Indian languages and English is not among them. The output is not accented English — it is not
+English:
+
+| asked | heard |
+|---|---|
+| "Seven were impossible, and we had to rewrite them." | `Sraindari ansu alwe atcho rureshi chong.` |
+| "Last week the system processed forty-seven segments." | `Also, this is the process of making` ×95 |
+| "Thirty-one fit perfectly." | `This is my surface fatigue.` |
+
+**That arm scored 0.754, 84% of scale — and one clip reached 0.851 at 91%, higher than anything
+the working Hindi arms produced.** This is the third time in this project that the best-looking
+number came from broken audio, so it is now a rule rather than an observation:
+
+> A speaker-similarity score is meaningless until the clip has been shown to say the right words.
+> Never report identity before content.
+
+Whisper loops on audio it cannot parse, fluently, so nothing downstream notices. A 3.97 s clip
+transcribed to 2074 characters — 522 characters per second — and the report printed it as a
+48 second prefix on a four second clip. `transcript_impossible()` now refuses to score any
+transcript above 40 cps.
+
+Four detectors are needed and none subsumes another:
+
+| failure | what catches it |
+|---|---|
+| invented words | `extra` |
+| speech before the sentence starts | `lead` (free-start alignment) |
+| clip cut short | `missing` |
+| **right length, right rhythm, wrong words** | **`cer` only** |
+| babble filling an over-long slot | pace, `got/natural` |
+| ASR degeneration | `transcript_impossible` |
+
+The fourth row is why `cer` is not redundant: the sentence above has no inserted span, no missing
+span and no prefix. Every positional check passes and not one word is correct.
+
+---
+
 ## 7. What an English reference actually changes inside IndicF5
 
 Read from `f5_tts/infer/utils_infer.py` in the public IndicF5 repo, not inferred. An English
@@ -297,12 +337,24 @@ That constraint came from the byte-ratio fault, not from the model. With the dur
 a **10 s English reference** is clean (0 bad clips of 7) and correctly paced (1.00x natural), at
 the same content quality as the Hindi arm. Recording speakers in Hindi is no longer required.
 
-**Still unmeasured, and required before this ships:** `indicf5_diagnose.py` scores content only.
-Whether the corrected English arm keeps the 92% identity that `en_ref_10s` scored is not known —
-shortening the allocation changes what the model generates, and identity has to be re-measured on
-the corrected configuration through `colab/indicf5_check.py`. Do not quote 92% for the fixed arm.
+**Measured 2026-09-17.** The corrected English reference ties the Hindi one on identity:
 
-Keep the reference under 15 s until the transcript-truncation fault is fixed.
+| arm | sim | position | got/natural | prefix | cer |
+|---|---|---|---|---|---|
+| `en_hi` (English reference, corrected) | 0.768 | **93%** | 1.00 | 0.2 s | 0.114 |
+| `hi_hi` (Hindi reference, control) | 0.785 | 86% | 0.97 | 0.0 s | 0.091 |
+
+A difference of −0.017 at 0.7 standard errors — indistinguishable. Both were judged good by ear.
+**The shipping configuration is a 10 s English reference with the duration corrected**, which is
+what production supplies anyway.
+
+The 92% the broken `en_ref_10s` arm scored is not carried forward anywhere: correcting the
+duration changes what the model generates, so that number describes a configuration that no
+longer exists.
+
+**Open:** one clip in seven still opens with a 14-character prefix (`पेंट केगे उसे`), down from
+three seconds on every clip. Keep the reference under 15 s until the transcript-truncation fault
+is fixed.
 
 ---
 
