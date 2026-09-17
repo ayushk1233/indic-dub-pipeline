@@ -1176,3 +1176,36 @@ that reports how many characters the model speaks before the sentence begins. Ex
   - `MAX_LEAD` is 0.05, tighter than `MAX_EXTRA` at 0.15, because the failures are not
     comparable. Scattered insertions worth 12% of a sentence are tolerable; three contiguous
     seconds before it starts are not, and that is what scored 0.12 and passed.
+
+## Step 82 — Phase 4 (model choice) — a discriminator that does not depend on English quality
+
+Checked IndicF5's declared coverage before spending a run on it. Eleven Indian languages, trained
+on Rasa, IndicTTS, LIMMITS and IndicVoices-R; **English is not among them.** It will produce
+English — Latin is the largest script in its custom vocabulary at 1501 of 2545 tokens, and two of
+those corpora are full of Indian-accented English and code-mixing — but not as a declared
+capability.
+
+That undermines step 81's plan. `en_en` was going to be the discriminator for the prefix, and a
+prefix measured by transcribing back speech the model cannot produce well is not a measurement.
+Added `en_deva` instead: the same English clip, the same Hindi sentences, the same corrected
+duration, with only the reference transcript's script moved. `en_en` stays, because "can it clone
+this speaker in English" is a question the user asked and it deserves its own arm — it is just no
+longer load-bearing for the diagnosis.
+
+The Devanagari transcript is Whisper's Hindi-mode reading of the reference audio, not a
+transliteration of the English text.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 137 passed.
+
+**Deviations:**
+  - Whisper now loads twice per run, once before synthesis for the reference transcript and once
+    after for the outputs, rather than staying resident. A minute of load time is cheaper than
+    holding a second model on a T4 beside IndicF5 and XTTS, and the existing ordering exists
+    precisely to keep them from competing.
+  - The Devanagari reference transcript is derived from the audio rather than from the English
+    spelling on purpose. A transliteration would have introduced alignment error of its own —
+    ITRANS renders "tell you" as तेल्ल् योउ — so a null result could not have been told apart
+    from a bad transliteration. Whisper describes what is on the tape.
+  - `en_deva` keeps the duration correction even though a Devanagari reference transcript would
+    make the byte ratio roughly right by itself. Leaving it out would have moved two variables
+    between `en_hi` and `en_deva` instead of one.

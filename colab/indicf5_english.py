@@ -16,16 +16,25 @@ remainder is spoken at the start of the kept region. A vocabulary gap would
 have explained that and was ruled out: the English transcript tokenizes at 100%
 against IndicF5's own vocabulary, in which Latin is the largest script.
 
-That leaves two candidates, and the English-to-English arm separates them.
+That leaves two candidates: the model cannot align Latin reference text to
+audio at all, or it cannot carry a script change across one sequence. `en_deva`
+separates them. It is the same English clip, the same Hindi output and the same
+corrected duration as `en_hi`, with only the reference transcript's script
+moved — and the Devanagari transcript is not a transliteration of the English
+text but Whisper's own Hindi-mode reading of the reference audio, so it
+describes what is actually on the tape rather than what the English spelling
+suggests. A transliteration would have introduced its own alignment error and
+made a null result unreadable.
 
-  - If `en_en` is clean, the model aligns an English reference to English audio
-    perfectly well, and what breaks is the switch from Latin to Devanagari
-    inside one sequence. The next test transliterates the reference transcript
-    and holds everything else fixed.
-  - If `en_en` carries the same prefix, the model cannot align English audio to
-    English text at all, and no arrangement of the Hindi side will fix it. An
-    English reference would then need a transcript in Devanagari, or the
-    reference has to be Hindi.
+  - `en_deva` clean, `en_hi` not  -> the script inside the sequence is the
+        problem, and an English reference works with a Devanagari transcript.
+  - both carry the prefix          -> the model cannot align this English audio
+        to any transcript, and the reference has to be Hindi.
+
+IndicF5 declares eleven Indian languages and English is not among them, so
+`en_en` is not load-bearing for that comparison: poor English would make its
+prefix reading unreliable, which is exactly why the discriminator is `en_deva`
+and not `en_en`. What `en_en` answers is a separate question worth its own arm.
 
 The second question is the one this project actually ships on, and it has been
 unmeasured since the duration fix: content is not identity. Correcting the
@@ -55,6 +64,7 @@ import torch
 from colab import speaker_scale
 from colab.english_report import cosine
 from colab.indicf5_check import (
+    ASR_MODEL,
     FIXTURES,
     MAX_EXTRA,
     MAX_MISSING,
@@ -85,9 +95,10 @@ MAX_LEAD = 0.05                 # a prefix worth more than 5% of the sentence
 # Latin generated text is the one case the byte formula gets right unaided, and
 # leaving it alone turns that arm into a test of the explanation.
 ARMS = [
-    ("en_en", "english_reference_short.wav", "english_short", "en", None,  "en", "same"),
-    ("en_hi", "english_reference_short.wav", "english_short", "hi", "auto", "en", "cross"),
-    ("hi_hi", "hindi_reference_short.wav",   "hindi_short",   "hi", None,   "hi", "same"),
+    ("en_en",   "english_reference_short.wav", "english_short", "en", None,   "en", "same"),
+    ("en_hi",   "english_reference_short.wav", "english_short", "hi", "auto", "en", "cross"),
+    ("en_deva", "english_reference_short.wav", "@deva",         "hi", "auto", "en", "cross"),
+    ("hi_hi",   "hindi_reference_short.wav",   "hindi_short",   "hi", None,   "hi", "same"),
 ]
 
 NATURAL = {"en": NATURAL_CPS_EN, "hi": NATURAL_CPS_HI}
@@ -113,6 +124,22 @@ def mean(rows, key):
     return float(np.mean(values)) if values else float("nan")
 
 
+def hear(path, language):
+    """One clip, one transcript. Whisper is loaded and dropped around it."""
+    from transformers import pipeline
+
+    device = 0 if torch.cuda.is_available() else -1
+    asr = pipeline("automatic-speech-recognition", model=ASR_MODEL, device=device,
+                   torch_dtype=torch.float16 if device == 0 else torch.float32)
+    try:
+        out = asr(str(path), generate_kwargs={"language": language,
+                                              "task": "transcribe"})
+        return (out or {}).get("text", "").strip()
+    finally:
+        del asr
+        torch.cuda.empty_cache()
+
+
 def main(sentence_count=7):
     needed = ["english_speech.wav", "hindi_speech.wav", "scripted_text.json",
               "reference_text.json", "english_reference_short.wav",
@@ -132,6 +159,25 @@ def main(sentence_count=7):
     section("SETUP")
     p(f"{len(lines['en'])} English and {len(lines['hi'])} Hindi sentences, "
       f"{len(ARMS)} arms, single chunk throughout")
+
+    # Whisper first and alone. The Devanagari reference transcript has to exist
+    # before IndicF5 is asked to condition on it, and loading the two models
+    # sequentially rather than together keeps a T4 comfortable.
+    section("REFERENCE TRANSCRIPTS")
+    deva = hear(FIXTURES / "english_reference_short.wav", "hi")
+    transcripts["@deva"] = {"text": deva}
+    latin = transcripts["english_short"]["text"]
+    p(f"  latin      {len(latin):>4} chars, {len(latin.encode('utf-8')):>4} bytes")
+    p(f"             {latin}")
+    p(f"  devanagari {len(deva):>4} chars, {len(deva.encode('utf-8')):>4} bytes")
+    p(f"             {deva}")
+    p("")
+    p("  The same ten seconds of English, read by Whisper in Hindi. Not a")
+    p("  transliteration of the English spelling — a description of what is on")
+    p("  the tape, in the script the model was trained on.")
+
+    if not deva:
+        p("  !! empty, so en_deva cannot run and the discriminator is lost")
 
     from colab.xtts_worker import XTTSWorker
 
@@ -251,18 +297,24 @@ def main(sentence_count=7):
     en_hi = table.get("en_hi", {})
     hi_hi = table.get("hi_hi", {})
 
+    deva = table.get("en_deva", {})
     p("  Question 1 — where does the prefix come from?")
-    if en_en and en_en["lead"] <= MAX_LEAD:
-        p("    en_en is clean. The model aligns an English reference to English")
-        p("    audio without trouble, so what breaks is the switch from Latin to")
-        p("    Devanagari inside one sequence — not the English reference. Next")
-        p("    test: the same English clip with its transcript transliterated")
-        p("    into Devanagari, which moves the script and nothing else.")
-    elif en_en:
-        p("    en_en carries the prefix too. The model cannot align this English")
-        p("    audio to its English transcript at all, so no arrangement of the")
-        p("    Hindi side fixes it. An English reference needs a transcript the")
-        p("    model can align, or the reference has to be Hindi.")
+    p("    en_hi and en_deva differ in one thing: the script of the reference")
+    p("    transcript. Same clip, same sentences, same corrected duration.")
+    if deva and en_hi:
+        p(f"    en_hi   prefix {en_hi['lead_s']:.1f}s")
+        p(f"    en_deva prefix {deva['lead_s']:.1f}s")
+        if deva["lead"] <= MAX_LEAD < en_hi["lead"]:
+            p("    The script inside the sequence is the problem. An English")
+            p("    reference works, given a transcript in the script the model")
+            p("    was trained on — and the pipeline's ASR already produces one.")
+        elif deva["lead"] > MAX_LEAD and en_hi["lead"] > MAX_LEAD:
+            p("    Both carry it, so this is not about script. The model cannot")
+            p("    align this English audio to any transcript, and the reference")
+            p("    has to be Hindi. Recording each speaker once in Hindi returns")
+            p("    to the table as the shipping answer.")
+        else:
+            p("    Neither reading holds cleanly. Listen before concluding.")
 
     p("")
     p("  Question 2 — does IndicF5 clone this speaker in English?")
@@ -270,6 +322,9 @@ def main(sentence_count=7):
         p(f"    {en_en['sim']:.3f}, {en_en['pos']:.0f}% of scale. XTTS-v2 scored")
         p("    0.502 and 47% on the same speaker, and sounded heavily accented.")
         p("    Identity is not accent: listen before reading this as a win.")
+        p("    English is not one of IndicF5's eleven declared languages, so a")
+        p("    poor result here is a limit of the model rather than a fault to")
+        p("    chase, and a good one is a bonus for code-mixed Hinglish input.")
 
     p("")
     p("  Question 3 — what does the corrected English arm actually score?")
