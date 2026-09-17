@@ -79,6 +79,7 @@ from colab.indicf5_diagnose import install_patches, _mode
 
 OUT = Path("/content/indicf5_english")
 REPORT = Path("/content/indicf5_english.txt")
+PROBE_REPORT = Path("/content/indicf5_probe.txt")
 
 SAMPLE_RATE = 24000
 SEED = 0
@@ -142,6 +143,7 @@ def hear(path, language):
 
 
 def main(sentence_count=7):
+    _lines.clear()
     needed = ["english_speech.wav", "hindi_speech.wav", "scripted_text.json",
               "reference_text.json", "english_reference_short.wav",
               "hindi_reference_short.wav"]
@@ -427,6 +429,7 @@ def probe(sentence_count=7):
         rows = eng.probe()
         eng.listen(rows, arms=("en_hi", "en_deva"))
     """
+    _lines.clear()
     OUT.mkdir(parents=True, exist_ok=True)
     scripted = json.loads((FIXTURES / "scripted_text.json").read_text(encoding="utf-8"))
     transcripts = json.loads((FIXTURES / "reference_text.json").read_text(encoding="utf-8"))
@@ -529,6 +532,6 @@ def probe(sentence_count=7):
             p(f"  Mixed: {lead['en_hi']} against {lead['en_deva']} of "
               f"{sentence_count}. Too few clips to call. Listen.")
 
-    REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
-    print(f"\nwrote {REPORT}")
+    PROBE_REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
+    print(f"\nwrote {PROBE_REPORT}")
     return rows
