@@ -208,7 +208,46 @@ def score_text(intended, heard):
         "cer": (subs + insertions + deletions) / length,
         "extra": insertions / length,
         "missing": deletions / length,
+        "lead": leading_extra(reference, hypothesis) / length,
+        "lead_chars": leading_extra(reference, hypothesis),
     }
+
+
+def leading_extra(reference, hypothesis):
+    """
+    How many characters the model speaks before the sentence it was asked for
+    begins.
+
+    A total insertion rate cannot see this. Three seconds of invented speech at
+    the front of a twelve second clip scores 0.12 — under any threshold loose
+    enough to tolerate Whisper's own Hindi error — while thirteen characters
+    scattered through the same sentence would be genuinely harmless. The
+    failure is contiguous and positional, so it has to be measured that way.
+
+    The alignment is the usual Levenshtein one with a free start: beginning
+    anywhere in the transcript costs nothing, so the cheapest reading of a clip
+    that opens with junk is to skip the junk, and the length of that skip is
+    the answer. The end is not free, because speech that runs on past the
+    sentence is a real insertion and is already counted as one.
+    """
+    n, m = len(reference), len(hypothesis)
+    if not n:
+        return 0
+
+    row = [(0, j) for j in range(m + 1)]
+    for i in range(1, n + 1):
+        previous, row = row, [(i, 0)]
+        for j in range(1, m + 1):
+            sub_cost, sub_start = previous[j - 1]
+            if reference[i - 1] != hypothesis[j - 1]:
+                sub_cost += 1
+            del_cost, del_start = previous[j]
+            ins_cost, ins_start = row[j - 1]
+            row.append(min((sub_cost, sub_start),
+                           (del_cost + 1, del_start),
+                           (ins_cost + 1, ins_start)))
+
+    return row[m][1]
 
 
 def transcribe_outputs(rows):
@@ -233,13 +272,15 @@ def transcribe_outputs(rows):
             continue
         try:
             out = asr(str(row["path"]),
-                      generate_kwargs={"language": "hi", "task": "transcribe"})
+                      generate_kwargs={"language": row.get("language", "hi"),
+                                       "task": "transcribe"})
             row["heard"] = (out or {}).get("text", "").strip()
             row.update(score_text(row["text"], row["heard"]))
         except Exception as exc:
             row["heard"] = f"<{type(exc).__name__}: {exc}>"
             row.update({"cer": float("nan"), "extra": float("nan"),
-                        "missing": float("nan")})
+                        "missing": float("nan"), "lead": float("nan"),
+                        "lead_chars": 0})
 
     return rows
 

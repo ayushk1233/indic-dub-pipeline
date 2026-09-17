@@ -1136,3 +1136,43 @@ run locally; IndicF5's repository is gated and its vocabulary only exists in the
   - Step 79's chunk-seam explanation is retracted. It was consistent with the timing the listener
     reported but did not survive the single-chunk arm. Chunking is now settled as irrelevant to
     content: it neither causes the babble nor prevents it.
+
+## Step 81 — Phase 4 (model choice) — English to English, and identity on the corrected arm
+
+`colab/vocab_check.py` ruled out the vocabulary gap: the English transcript tokenizes at 100%
+against IndicF5's own vocabulary, in which Latin is the largest script at 1501 of 2545 tokens.
+The model has the tokens and is not using them to align.
+
+Two candidates remain and the English-to-English arm separates them. Added
+`colab/indicf5_english.py` with three arms, single chunk throughout: `en_en` (English reference,
+English output, no duration correction), `en_hi` (corrected), `hi_hi` (control). It scores
+identity on the calibrated scale as well as content, because the two questions outstanding —
+where the prefix comes from, and what the corrected English arm is actually worth — share a
+reference clip.
+
+Added `leading_extra()` to `colab/indicf5_check.py`, a Levenshtein alignment with a free start
+that reports how many characters the model speaks before the sentence begins. Extracted
+`colab/speaker_scale.py` from the calibration built inline in `indicf5_check.main()`.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 137 passed, 17 of them new across
+`tests/test_leading_extra.py` and `tests/test_speaker_scale.py`.
+
+**Deviations:**
+  - `en_en` deliberately takes no duration correction. Latin reference text against Latin
+    generated text makes the byte ratio 1:1, which is the one case the formula gets right
+    unaided, so leaving it alone turns that arm into an independent check on the whole
+    byte-ratio account. If it returns near 1.0x natural English with nothing applied, the
+    explanation holds from a second direction. The report states that check explicitly.
+  - Identity on the corrected English arm is measured here for the first time and the 92% that
+    the broken `en_ref_10s` arm scored is not carried forward anywhere. Correcting the duration
+    changes what the model generates, so that number describes a configuration that no longer
+    exists.
+  - `speaker_scale.py` duplicates rather than replaces the calibration inside
+    `indicf5_check.main()`. The extraction is mechanical, but that module cannot be run locally
+    — it needs a GPU and a gated checkpoint — so replacing a working scorer on an unverifiable
+    change would risk the one instrument every voice result in this project is read on. The
+    pure arithmetic is now under test either way, and `indicf5_check` should adopt it once a run
+    confirms the two agree.
+  - `MAX_LEAD` is 0.05, tighter than `MAX_EXTRA` at 0.15, because the failures are not
+    comparable. Scattered insertions worth 12% of a sentence are tolerable; three contiguous
+    seconds before it starts are not, and that is what scored 0.12 and passed.
