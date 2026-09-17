@@ -39,6 +39,36 @@ module should name a host directory directly.
 
 Clone into `/kaggle/working`, not `/kaggle/input`, which is read only.
 
+## Persistence, which is not what it looks like
+
+`/kaggle/working` survives a kernel restart but **not a container replacement**.
+Close the tab, hit the idle timeout, or let the session be recycled, and the
+next container restores that directory only from the last *saved version's*
+output. Everything from an unsaved session is gone — generated audio, reports,
+and the clone itself.
+
+The symptom is a directory holding nothing but `.virtual_documents` after a run
+that clearly wrote files. Nothing failed; the container is simply a different
+one.
+
+So: **Save Version** before leaving, or treat every session as disposable and
+re-clone at the top. The second is cheaper here. The clone is seconds, the pip
+install is a couple of minutes, and the model weights come from the Hugging
+Face cache rather than `/kaggle/working`. Only generated audio is worth saving,
+and only until it has been listened to.
+
+To carry a run's output out of a session without saving a version:
+
+```python
+import shutil
+from colab import workspace
+
+shutil.make_archive("/kaggle/working/run", "zip", workspace.root())
+```
+
+then download it from the Output panel, which needs the notebook saved anyway —
+so in practice, listen inside the session.
+
 ## What does not change
 
 The install order does. IndicF5 first, this repo's pins second, because IndicF5
