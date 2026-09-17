@@ -103,6 +103,14 @@ MAX_EXTRA = 0.15
 MAX_MISSING = 0.25
 MAX_CER = 0.35
 
+# Above this many characters per second the transcript cannot describe the clip
+# it came from. Natural speech runs 10.8 cps in Hindi and 13.1 in English, and
+# the fastest thing this project has ever synthesized was 22.9. Forty is not a
+# quality threshold, it is an impossibility threshold: Whisper loops on audio it
+# cannot parse, and a 3.97s clip that transcribes to 2074 characters is 522 cps.
+# Scoring that as content would report a 48 second prefix on a four second clip.
+LOOP_CPS = 40.0
+
 # How many pieces to cut each real take into when measuring the ceiling.
 # A 50 to 60 second take gives roughly 18s, 10s, 6s and 4s pieces, which
 # brackets both the test sentences and real dubbing segments.
@@ -250,6 +258,24 @@ def leading_extra(reference, hypothesis):
     return row[m][1]
 
 
+def transcript_impossible(heard, path):
+    """
+    True when the transcript is longer than the clip could physically contain.
+
+    Whisper repeats itself on audio it cannot parse, and the repetition is
+    fluent, so nothing downstream notices. This is the guard: no clip holds
+    more characters than LOOP_CPS times its own duration.
+    """
+    if not heard:
+        return False
+    try:
+        info = sf.info(str(path))
+        duration = info.frames / info.samplerate
+    except Exception:
+        return False
+    return bool(duration > 0 and len(heard) / duration > LOOP_CPS)
+
+
 def transcribe_outputs(rows):
     """
     Read every generated clip back and score it against the text asked for.
@@ -275,7 +301,17 @@ def transcribe_outputs(rows):
                       generate_kwargs={"language": row.get("language", "hi"),
                                        "task": "transcribe"})
             row["heard"] = (out or {}).get("text", "").strip()
-            row.update(score_text(row["text"], row["heard"]))
+            row["asr_looped"] = transcript_impossible(row["heard"], row["path"])
+            if row["asr_looped"]:
+                # Deliberately not scored. A degenerate transcript says the
+                # model produced something Whisper could not parse, which is a
+                # finding — but every number derived from it would describe
+                # Whisper's loop rather than the clip.
+                row.update({"cer": float("nan"), "extra": float("nan"),
+                            "missing": float("nan"), "lead": float("nan"),
+                            "lead_chars": 0})
+            else:
+                row.update(score_text(row["text"], row["heard"]))
         except Exception as exc:
             row["heard"] = f"<{type(exc).__name__}: {exc}>"
             row.update({"cer": float("nan"), "extra": float("nan"),

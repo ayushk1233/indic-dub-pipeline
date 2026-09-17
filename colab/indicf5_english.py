@@ -266,14 +266,17 @@ def main(sentence_count=7):
         # rest of the clip is running, which is what a listener actually hears.
         lead_s = float(np.mean([r.get("lead_chars", 0) / NATURAL[language]
                                 for r in items]))
+        looped = sum(1 for r in items if r.get("asr_looped"))
         table[arm] = {"sim": float(np.mean(sims)), "se": se,
                       "pos": mean(items, "pos"), "lead": mean(items, "lead"),
-                      "lead_s": lead_s, "extra": mean(items, "extra")}
+                      "lead_s": lead_s, "extra": mean(items, "extra"),
+                      "looped": looped, "n": len(items)}
         p(f"{arm:<8}{len(items):>3}{table[arm]['sim']:>8.3f}{se:>7.3f}"
           f"{table[arm]['pos']:>9.0f}%"
           f"{float(np.mean([r['actual_s'] / r['natural_s'] for r in items])):>9.2f}"
           f"{table[arm]['extra']:>8.3f}{table[arm]['lead']:>7.2f}"
-          f"{lead_s:>7.1f}s{mean(items, 'cer'):>7.3f}")
+          f"{lead_s:>7.1f}s{mean(items, 'cer'):>7.3f}"
+          + (f"   {looped}/{len(items)} unreadable" if looped else ""))
 
     section("THE PREFIX")
     p("  lead is speech before the sentence begins, as a fraction of the")
@@ -318,6 +321,14 @@ def main(sentence_count=7):
 
     p("")
     p("  Question 2 — does IndicF5 clone this speaker in English?")
+    if en_en and en_en.get("looped"):
+        p(f"    {en_en['looped']} of {en_en['n']} clips produced audio Whisper")
+        p("    could not parse — it looped instead, emitting more characters")
+        p("    than the clip could physically contain. Those clips are not")
+        p("    scored for content, and the identity figure below describes")
+        p("    whatever sound was produced, not English speech. A high cosine")
+        p("    on unintelligible audio is the failure this project already")
+        p("    documented once: the encoder reads timbre and nothing else.")
     if en_en:
         p(f"    {en_en['sim']:.3f}, {en_en['pos']:.0f}% of scale. XTTS-v2 scored")
         p("    0.502 and 47% on the same speaker, and sounded heavily accented.")
@@ -367,6 +378,8 @@ def listen(rows, arms=None, indexes=None):
                        key=lambda r: order.index(r["arm"]))
         for row in group:
             notes = []
+            if row.get("asr_looped"):
+                notes.append("UNREADABLE (ASR looped)")
             if row.get("lead", 0) > MAX_LEAD:
                 notes.append(f"PREFIX {row.get('lead_chars', 0)} chars")
             if row.get("extra", 0) > MAX_EXTRA:
@@ -378,6 +391,10 @@ def listen(rows, arms=None, indexes=None):
                   f"sim {row['sim']:.3f}  {row['pos']:.0f}%"
                   + ("   " + "  ".join(notes) if notes else ""))
             print(f"  asked: {row['text']}")
-            if row.get("heard") and row.get("cer", 0) > 0.05:
-                print(f"  heard: {row['heard']}")
+            heard = row.get("heard") or ""
+            if row.get("asr_looped"):
+                print(f"  heard: {heard[:160]}...  [{len(heard)} chars from a "
+                      f"{row['actual_s']:.1f}s clip]")
+            elif heard and row.get("cer", 0) > 0.05:
+                print(f"  heard: {heard}")
             display(Audio(str(row["path"])))
