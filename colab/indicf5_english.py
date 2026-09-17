@@ -62,6 +62,7 @@ import soundfile as sf
 import torch
 
 from colab import speaker_scale
+from colab import workspace
 from colab.english_report import cosine
 from colab.indicf5_check import (
     ASR_MODEL,
@@ -77,9 +78,9 @@ from colab.indicf5_check import (
 )
 from colab.indicf5_diagnose import install_patches, _mode
 
-OUT = Path("/content/indicf5_english")
-REPORT = Path("/content/indicf5_english.txt")
-PROBE_REPORT = Path("/content/indicf5_probe.txt")
+OUT = workspace.out("indicf5_english")
+REPORT = workspace.report("indicf5_english.txt")
+PROBE_REPORT = workspace.report("indicf5_probe.txt")
 
 SAMPLE_RATE = 24000
 SEED = 0
@@ -184,7 +185,7 @@ def main(sentence_count=7):
 
     from colab.xtts_worker import XTTSWorker
 
-    worker = XTTSWorker(Path("/content/unused_bundle"))
+    worker = XTTSWorker(workspace.out("unused_bundle"))
     worker.load_model()
     xtts = worker.xtts
 

@@ -1269,3 +1269,32 @@ character error rate sees it — but `listen()` was not surfacing it.
     reference transcript's script, which is a pipeline design question — where the reference
     transcript comes from — and is worth answering before the TTS backend is written rather
     than after.
+
+## Step 85 — Phase 4 (model choice) — run anywhere, not just Colab
+
+The work moved to Kaggle for its 30 weekly GPU hours. Two things broke.
+
+IndicF5 is gated, and Colab's secrets panel is wired into `huggingface_hub` while Kaggle's is
+not: a secret named `HF_TOKEN` is stored and never read, so every download returns a 401 that
+reads like a permissions failure and is not one. Documented in `colab/kaggle.md` with the
+three-line fix.
+
+Every output path was `/content`, which exists on Colab and nowhere else. Added
+`colab/workspace.py` and moved `indicf5_check`, `indicf5_diagnose` and `indicf5_english` onto it.
+`vocab_check` no longer assumes the Hugging Face cache lives under `/root`.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 149 passed, 6 of them new in
+`tests/test_workspace.py`.
+
+**Deviations:**
+  - `workspace.root()` prefers `/kaggle/working` over `/content` when both exist, and both over
+    the working directory. On Kaggle only `/kaggle/working` persists and can be downloaded, and
+    a container running as root will happily create `/content` at the filesystem root and lose
+    everything written there at the end of the session.
+  - Resolution happens at import rather than at call time, so a module's `OUT` is a constant
+    within a run. `INDIC_DUB_WORKSPACE` overrides it, which is also how the tests exercise it
+    without a Kaggle container.
+  - Importing creates no directories. That is asserted, because a module-level path with a
+    filesystem side effect makes the test suite depend on import order.
+  - The directory is still named `colab/`. Renaming it would touch every import in the project
+    and the notebook, for no behavioural gain, and Colab remains a supported host.

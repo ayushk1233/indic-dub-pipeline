@@ -42,17 +42,37 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 FIXTURES = REPO / "fixtures"
 
-VOCAB_GLOB = ("/root/.cache/huggingface/hub/models--ai4bharat--IndicF5/"
-              "snapshots/*/checkpoints/vocab.txt")
+# HF_HOME moves on some hosts, so the cache is searched rather than assumed.
+VOCAB_TAIL = "hub/models--ai4bharat--IndicF5/snapshots/*/checkpoints/vocab.txt"
 
 
-def find_vocab(pattern=VOCAB_GLOB):
-    matches = sorted(glob.glob(pattern))
-    if not matches:
-        raise FileNotFoundError(
-            f"no vocab.txt under {pattern} — load the model once first, or "
-            "pass the path printed by load_indicf5 as `vocab :`")
-    return Path(matches[-1])
+def cache_roots():
+    import os
+
+    seen, roots = set(), []
+    for candidate in (os.environ.get("HF_HOME"),
+                      os.environ.get("HUGGINGFACE_HUB_CACHE"),
+                      str(Path.home() / ".cache" / "huggingface"),
+                      "/root/.cache/huggingface",
+                      "/kaggle/working/.cache/huggingface"):
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            roots.append(candidate)
+    return roots
+
+
+def find_vocab(pattern=None):
+    patterns = [pattern] if pattern else [
+        str(Path(root) / VOCAB_TAIL) for root in cache_roots()]
+
+    for candidate in patterns:
+        matches = sorted(glob.glob(candidate))
+        if matches:
+            return Path(matches[-1])
+
+    raise FileNotFoundError(
+        f"no vocab.txt under any of {patterns} — load the model once first, "
+        "or pass the path printed by load_indicf5 as `vocab :`")
 
 
 def read_vocab(path):

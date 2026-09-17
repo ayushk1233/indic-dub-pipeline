@@ -57,6 +57,7 @@ import numpy as np
 import soundfile as sf
 import torch
 
+from colab import workspace
 from colab.indicf5_check import (
     FIXTURES,
     MAX_EXTRA,
@@ -68,8 +69,8 @@ from colab.indicf5_check import (
     transcribe_outputs,
 )
 
-OUT = Path("/content/indicf5_diagnose")
-REPORT = Path("/content/indicf5_diagnose.txt")
+OUT = workspace.out("indicf5_diagnose")
+REPORT = workspace.report("indicf5_diagnose.txt")
 
 SAMPLE_RATE = 24000
 HOP_LENGTH = 256

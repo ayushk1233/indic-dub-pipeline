@@ -39,13 +39,14 @@ import numpy as np
 import soundfile as sf
 import torch
 
+from colab import workspace
 from colab.english_report import cosine
 
 
 REPO = Path(__file__).resolve().parent.parent
 FIXTURES = REPO / "fixtures"
-OUT = Path("/content/indicf5_check")
-REPORT = Path("/content/indicf5_report.txt")
+OUT = workspace.out("indicf5_check")
+REPORT = workspace.report("indicf5_report.txt")
 
 INDICF5_REPO = "ai4bharat/IndicF5"
 SAMPLE_RATE = 24000
