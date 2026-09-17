@@ -1362,3 +1362,31 @@ byte counts in the report showing both transcripts were Latin.
     corroboration across a wider sample than the flag itself.
   - Deferred: the 25s reference transcript truncation is still open and still separate. The
     shipping configuration keeps references under 15s, which avoids it entirely.
+
+## Step 88 — Phase 4 (model choice) — reorder the findings for reading rather than discovery
+
+`FINDINGS.md` had grown by accretion: sections 6b and 7b wedged between numbered ones, a
+superseded conclusion, corrections scattered across the sections they corrected. It is the
+context artifact a later session loads first, and it was ordered by when things were learned
+rather than by what a reader needs.
+
+Rewritten in reading order. The shipping configuration is section 1, so the answer arrives before
+the reasoning. Calibration, the identity-before-content rule and the IndicF5 mechanics follow,
+then the historical results, then the operational material. Every measured number is carried over
+unchanged.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 158 passed. No code changed.
+
+**Deviations:**
+  - Added section 14, a table of the eight claims made here that turned out to be wrong and what
+    replaced each. They were previously recorded where they happened, which meant a reader had to
+    finish the document to know which conclusions still hold. Two were caught by ear rather than
+    by any metric, and that is noted, because it is the strongest argument in the file for
+    listening to output that the numbers have passed.
+  - The four IndicF5 faults are now subsections of one section rather than separate findings.
+    They share a mechanism — the model is handed text it cannot place against the conditioned
+    frames — and reading them apart was what let the chunking and seam explanations stand as long
+    as they did.
+  - Retracted material is kept rather than deleted, including the conditioning sweep and the
+    cross-lingual prediction. A later session finding them cited elsewhere needs to know they do
+    not hold.

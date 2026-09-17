@@ -1,35 +1,64 @@
 # Voice cloning findings
 
-Everything here was measured on this repo's fixtures unless it says otherwise. It exists so a
-later session does not re-derive it, and so a claim can be checked against the run that produced
-it rather than against memory. Read it before proposing anything about speaker similarity,
-reference clips, or IndicF5's pacing.
+English-to-Hindi dubbing: what was measured, what it means, and what turned out to be wrong.
 
-Produced by `colab/four_arm.py` and `colab/indicf5_check.py`, against
-`fixtures/{english,hindi}_reference*.wav` and `fixtures/scripted_text.json`.
+Every number here came from a run against this repo's fixtures, and the run that produced it is
+named. Read this before proposing anything about speaker similarity, reference clips, or pacing —
+several of the obvious moves have already been tried and measured, and three of the conclusions in
+here replaced earlier ones that were confidently wrong.
+
+Produced by `colab/four_arm.py`, `colab/indicf5_check.py`, `colab/indicf5_diagnose.py` and
+`colab/indicf5_english.py`.
 
 ---
 
-## 1. A cosine similarity is meaningless without its own floor and ceiling
+## 1. The shipping configuration
+
+Settled 2026-09-17.
+
+| | |
+|---|---|
+| model | **IndicF5** (MIT) |
+| reference clip | 10 s, **English**, under the 15 s internal clipping threshold |
+| reference transcript | **lowercased, punctuation stripped** |
+| duration | set from the target slot, **not** from the byte ratio |
+| chunking | single chunk |
+| identity | 0.768 — **93% of the calibrated scale** |
+| pace | 1.00x natural Hindi |
+| content | clean across 7 sentences, 0 prefixes, cer 0.114 |
+
+Against the Hindi-reference control at 0.785 and 86%, that is a difference of −0.017 at 0.7
+standard errors: indistinguishable. Both were judged good by ear.
+
+**What this buys.** No per-speaker Hindi recording session. No transliteration dependency. No
+licence dead end. The reference is an English clip, which is what production supplies anyway.
+
+**Do not** use XTTS-v2 (see §8), do not ask IndicF5 for English output (§3), do not hand it a
+reference over 15 s (§4d), and do not quote the 92% that the pre-fix `en_ref_10s` arm scored —
+correcting the duration changed what the model generates, so that number describes a
+configuration that no longer exists.
+
+---
+
+## 2. A similarity score is meaningless without its own floor and ceiling
 
 A raw speaker-embedding cosine cannot be read as a percentage of anything. Three separate
-calibration errors were made and corrected during this work, and each one moved a headline number
-by ten points or more.
+calibration errors were made here and each moved a headline number by ten points or more.
 
-**Floor** — 0.095, the mean cosine of the speaker against 58 XTTS studio speakers. That is what
-"a stranger" scores, and it is not zero.
+**Floor — 0.095.** The speaker against 58 XTTS studio speakers. That is what a stranger scores,
+and it is not zero.
 
-**Ceiling** — the speaker against himself, no synthesis anywhere in the measurement.
+**Ceiling — the speaker against himself**, no synthesis anywhere in the measurement.
 
-**Cross-language ceiling** — a real human's embedding shifts between languages. Synthesis of
-`en -> hi` must be scored against *his real Hindi versus his real English*, not against a
-same-language ceiling. Ignoring this made cross-lingual results look far worse than they were.
+**Cross-language ceiling.** A real human's embedding shifts between languages, so `en -> hi`
+synthesis must be scored against *his real Hindi versus his real English*, not a same-language
+ceiling. Ignoring this made cross-lingual results look far worse than they were.
 
-**Duration-matched ceiling** — embeddings from short audio are noisier and regress toward the
-population mean. Measured r = +0.82 between clip duration and similarity. A ceiling measured on
-17 s thirds must not be applied to 5 s clips.
+**Duration-matched ceiling.** Embeddings from short audio are noisier and regress toward the
+population mean. Measured r = +0.82 between clip duration and similarity, so a ceiling measured on
+17 s pieces must not be applied to 5 s clips.
 
-| clip length | same-language ceiling | cross-language ceiling |
+| clip length | same-language | cross-language |
 |---|---|---|
 | 16.7 s | 0.968 | 0.887 |
 | 8.3 s | 0.923 | 0.857 |
@@ -37,125 +66,84 @@ population mean. Measured r = +0.82 between clip duration and similarity. A ceil
 | 3.6 s | 0.847 | 0.779 |
 
 The ceiling falls 0.108 from 17 s to 3.6 s. Most of the apparent short-segment collapse in earlier
-runs was the ruler, not the model. The real 14-segment bundle from `english.mov` averages under
-5 s, which is the least reliable bucket.
+runs was the ruler, not the model. Real dubbing segments matter here: the 14-segment bundle from
+`english.mov` averages under 5 s, the least reliable bucket.
 
-`position = 100 * (score - floor) / (ceiling_for_this_clip_length - floor)`, averaged per clip —
-never the mean score placed on one ceiling.
+```
+position = 100 * (score - floor) / (ceiling_at_this_clip_length - floor)
+```
 
----
-
-## 2. The four-arm result: cross-lingual transfer is not the bottleneck
-
-XTTS-v2, clean re-recorded references, three sentences per arm.
-
-| arm | greedy | sampled | position |
-|---|---|---|---|
-| `en -> en` | 0.502 | 0.486 | 47% |
-| `hi -> hi` | 0.719 | 0.689 | 72% |
-| `en -> hi` | 0.713 | 0.718 | **78%** (cross-language scale) |
-| `hi -> en` | 0.553 | 0.532 | 53% |
-
-Holding the spoken language fixed and swapping only the reference language moves the score by
-−0.011 (speaking Hindi) and +0.048 (speaking English). Both sit inside the within-arm spread of
-0.021–0.077, and the second one *favours the foreign reference*.
-
-**What predicts the score is the language being spoken, not the language cloned from.** Speaking
-English lands near 0.52 from either reference; speaking Hindi lands near 0.71 from either.
-XTTS-v2's English decoder overwrites speaker identity — the same mechanism as its American accent,
-measured a second way.
-
-This retracted an earlier prediction of mine that a good English clone would prove cross-lingual
-transfer was the problem, and it removed voice conversion from the shortlist of fixes.
-
-Two further results from the same run:
-
-- Re-recording the reference moved production `en -> hi` from 48% to 71% on the same scale, while
-  `en -> en` moved only 42% to 47%. Recording quality is worth more than any parameter touched so far.
-- Greedy decoding beat sampling on three of four arms and tied on the fourth. `do_sample=False`
-  stays.
-
-An earlier seven-configuration conditioning sweep was **statistically meaningless** and should not
-be cited: the scale spans about 0.87 and the whole sweep spanned 0.046. Conditioning is held at
-the shipped XTTS-v2 values.
+averaged per clip — never the mean score placed on one ceiling. Implemented in
+`colab/speaker_scale.py`, arithmetic under test in `tests/test_speaker_scale.py`.
 
 ---
 
-## 3. The 90% target is inside the ruler's own noise
+## 3. Never report identity before content
 
-| target | raw cosine needed | gap from current 0.713 |
-|---|---|---|
-| 85% of scale | 0.776 | +0.063 |
-| **90% of scale** | **0.816** | +0.103 |
+**The rule, learned three times:**
 
-The cross-language ceiling's four readings were 0.923 / 0.914 / 0.862 / 0.886, a span of 0.061.
-**90% of scale (0.816) sits below the lowest reading of the human against himself.** It is a target
-inside the measurement error of the instrument. **85% is the defensible target.**
+> A speaker-similarity score is meaningless until the clip has been shown to say the right words.
+> The encoder reads timbre and nothing else, so nonsense in exactly the right voice outscores
+> clean speech in a slightly wrong one.
 
-The two complaints that prompted the target have different causes and different fixes:
+Three times in this project the best-looking number came from broken audio:
 
-- *"it matches the voice about 70%"* — timbre. This is what the cosine reads.
-- *"I would not emphasize like this"* — speaking style. **The cosine is nearly blind to it.**
+1. `indicf5 en_ref_25s` scored **97% of scale, the highest of any arm**, while inserting invented
+   speech between the intended words. Caught by ear, not by any metric — the project had no
+   content check at all until then.
+2. `en10_base` scored extra 0.04 — apparently clean — on a clip audibly full of gibberish.
+3. `en_en` scored **0.754 at 84%, one clip at 0.851 and 91%**, higher than anything the two
+   *working* Hindi arms produced, on audio that is not English at all (§3b).
 
-Zero-shot cloning copies vocal tract shape from the reference but takes delivery, emphasis and
-phrasing from the model's own priors. Both are cured by speaker-specific training, which XTTS-v2's
-licence forbids.
+### 3a. The detectors, and why none subsumes another
 
----
+| failure | what catches it |
+|---|---|
+| invented words | `extra` — insertions over intended length |
+| speech before the sentence starts | `lead` — free-start alignment |
+| clip cut short | `missing` — deletions |
+| **right length, right rhythm, wrong words** | **`cer` only** |
+| babble filling an over-long slot | pace, `got/natural` |
+| ASR degeneration | `transcript_impossible()` |
 
-## 4. Licensing decides this before quality does
+Thresholds: `extra > 0.15`, `missing > 0.25`, `cer > 0.35`, `lead > 0.05`.
 
-- **XTTS-v2 — CPML, non-commercial.** Coqui is defunct, so nobody can now grant commercial terms,
-  and fine-tuned checkpoints inherit the licence. Whatever it scores, it cannot ship. It stays as
-  a calibrated baseline only.
-- **IndicF5 — MIT.** 0.4B parameters, 1417 hours of Indian speech, clones from a reference clip
-  plus its transcript.
+`lead` is tighter than `extra` because the failures are not comparable: scattered insertions worth
+12% of a sentence are tolerable, three contiguous seconds before it starts are not — and three
+seconds at the front of a twelve second clip scores exactly 0.12 on a total rate.
 
----
+The fourth row is why `cer` is not redundant. "Seven were impossible, and we had to rewrite them."
+came back as `Sraindari ansu alwe atcho rureshi chong.` — no inserted span, no missing span, no
+prefix, not one correct word. Every positional check passes.
 
-## 5. IndicF5 versus XTTS-v2
+A single error rate is not enough either: gibberish appended to an otherwise correct sentence
+scores CER 0.309, below any threshold loose enough to tolerate Whisper's own Hindi error. The
+alignment counts insertions and deletions separately for exactly this reason. Verified against
+seven constructed cases including a matra difference at 0.018 and a truncation at 0.564.
 
-Seven Hindi sentences per arm, same sentences, same seed, same speaker encoder scoring both.
+### 3b. Two blind spots in the content check itself
 
-| model | arm | sim | se | position | cps | vs natural | gen |
-|---|---|---|---|---|---|---|---|
-| xtts | en_ref | 0.656 | 0.028 | 77% | 11.5 | 1.06x | 4.1 s |
-| xtts | hi_ref | 0.695 | 0.026 | 74% | 11.3 | 1.04x | 4.2 s |
-| indicf5 | en_ref_10s | 0.805 | 0.015 | 92% | 5.1 | **0.47x** | 39.0 s |
-| indicf5 | **hi_ref_10s** | **0.785** | 0.011 | **86%** | 11.1 | **1.03x** | 21.9 s |
-| indicf5 | en_ref_25s | 0.800 | 0.014 | 97% | 9.4 | 0.87x | 33.9 s |
+**Whisper is a fluency prior.** It emits well-formed text and discards non-lexical babble rather
+than transcribing it, so garbled audio can round-trip to a clean transcript. On `en10_base` the
+134-character sentence scored extra 0.04 and was audibly gibberish. What caught it was **pace**:
+`got/natural = 2.11`. Because the model fills exactly the slot it is handed, a pace ratio away
+from 1.0 is itself a content signal.
 
-Production case gap: **+0.149, combined standard error 0.031 — 4.6 standard errors.**
-
-Length behaviour: XTTS scores 71% under 8 s and 80% at or above; IndicF5 scores 92% and 91%. **No
-length degradation on IndicF5**, which matters because real dubbing segments are short.
-
----
-
-## 6. The highest-scoring arm was speaking gibberish
-
-`indicf5 en_ref_25s` scored **97%, the best of any arm**, and on listening it inserts invented
-speech between the intended words. This was caught by ear, not by any metric in the project.
-
-**Speaker similarity reads timbre only.** Nonsense in exactly the right voice outscores clean
-speech in a slightly wrong one. The project had no content check at all until commit `bc3b66b`.
-
-The check now in `colab/indicf5_check.py` transcribes every generated clip back with
-`whisper-large-v3-turbo` and aligns it to the intended text with a Levenshtein alignment that
-**counts insertions and deletions separately**. A single error rate is not enough: appended
-gibberish scores CER 0.309, which passes a 0.40 threshold. Thresholds are `extra > 0.15`
-(invented speech), `missing > 0.25` (cut short), `cer > 0.35`. Verified against seven constructed
-cases, including a matra difference at 0.018 and a truncation at 0.564.
-
-**Any future TTS comparison must gate on content before it reports identity.**
+**Whisper loops on audio it cannot parse**, fluently, so nothing downstream notices. A 3.97 s clip
+transcribed to 2074 characters of "the process of making" repeated — 522 characters per second —
+and the report printed it as a 48-second prefix on a four-second clip.
+`transcript_impossible()` now refuses to score any transcript above 40 cps. Natural speech is
+10.8 cps in Hindi and 13.1 in English; the fastest thing this project has synthesized was 22.9.
 
 ---
 
-## 6b. IndicF5 cannot generate English, and the encoder does not care
+## 4. IndicF5 cannot generate English
 
 Measured 2026-09-17, seven sentences, English reference, English output. IndicF5 declares eleven
-Indian languages and English is not among them. The output is not accented English — it is not
-English:
+Indian languages — Assamese, Bengali, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Punjabi,
+Tamil, Telugu — trained on Rasa, IndicTTS, LIMMITS and IndicVoices-R. English is not among them.
+
+The output is not accented English. It is not English:
 
 | asked | heard |
 |---|---|
@@ -163,46 +151,25 @@ English:
 | "Last week the system processed forty-seven segments." | `Also, this is the process of making` ×95 |
 | "Thirty-one fit perfectly." | `This is my surface fatigue.` |
 
-**That arm scored 0.754, 84% of scale — and one clip reached 0.851 at 91%, higher than anything
-the working Hindi arms produced.** This is the third time in this project that the best-looking
-number came from broken audio, so it is now a rule rather than an observation:
+Latin is nevertheless the largest script in its custom vocabulary (1501 of 2545 tokens) and the
+English transcript tokenizes at 100% coverage, so a vocabulary gap is **not** the explanation.
 
-> A speaker-similarity score is meaningless until the clip has been shown to say the right words.
-> Never report identity before content.
-
-Whisper loops on audio it cannot parse, fluently, so nothing downstream notices. A 3.97 s clip
-transcribed to 2074 characters — 522 characters per second — and the report printed it as a
-48 second prefix on a four second clip. `transcript_impossible()` now refuses to score any
-transcript above 40 cps.
-
-Four detectors are needed and none subsumes another:
-
-| failure | what catches it |
-|---|---|
-| invented words | `extra` |
-| speech before the sentence starts | `lead` (free-start alignment) |
-| clip cut short | `missing` |
-| **right length, right rhythm, wrong words** | **`cer` only** |
-| babble filling an over-long slot | pace, `got/natural` |
-| ASR degeneration | `transcript_impossible` |
-
-The fourth row is why `cer` is not redundant: the sentence above has no inserted span, no missing
-span and no prefix. Every positional check passes and not one word is correct.
+If English output is ever needed it will not come from this model.
 
 ---
 
-## 7. What an English reference actually changes inside IndicF5
+## 5. What an English reference changes inside IndicF5
 
-Read from `f5_tts/infer/utils_infer.py` in the public IndicF5 repo, not inferred. An English
-reference changes three things at once, and two of them apply even to a short clip.
+Read from `f5_tts/infer/utils_infer.py`, not inferred from output. Four distinct faults were found
+here, in this order, and only the first two were ever guessed correctly.
 
-**a. Duration allocation is computed in UTF-8 bytes.**
+### 5a. Duration is allocated in UTF-8 bytes — the primary fault
 
 ```
 duration = ref_audio_len + ref_audio_len / ref_text_bytes * gen_text_bytes / speed
 ```
 
-Latin is 1 byte per character, Devanagari is 3. So an English reference prices a Hindi character
+Latin is 1 byte per character, Devanagari is 3, so an English reference prices a Hindi character
 at roughly three times its real cost.
 
 | reference | seconds per byte |
@@ -210,7 +177,7 @@ at roughly three times its real cost.
 | English (Latin) | 0.0749 |
 | Hindi (Devanagari) | 0.0348 |
 
-F5-TTS is an in-filling model: it is told the total duration up front and must produce exactly
+F5-TTS is an **in-filling** model: it is told the total duration up front and must produce exactly
 that many frames. Over-allocation leaves surplus time that has to be filled with something.
 
 Implied reference length, recovered by inverting the ratio:
@@ -221,31 +188,12 @@ Implied reference length, recovered by inverting the ratio:
 | hi_ref_10s | 10.5 s | 9.4 s | 1.08x | **0.97x** |
 | en_ref_25s | 25.5 s | **13.7 s** | 2.13x pre-clip | 0.87x |
 
-**The `en_ref_25s` arm's healthy-looking 0.87x was luck.** Clipping 25 s down to 13.7 s divided the
-allocation by 1.83 and nearly cancelled the 2.15x script inflation. Two errors of opposite sign,
-not a working duration model.
+The 25 s arm's healthy-looking 0.87x was **luck**: clipping 25 s to 13.7 s divided the allocation
+by 1.83 and nearly cancelled the 2.15x script inflation. Two errors of opposite sign, not a
+working duration model.
 
-**b. Chunking is also computed in bytes.**
-
-```
-max_chars = ref_text_bytes / ref_seconds * (25 - ref_seconds)
-```
-
-A 10.5 s English reference permits about 200 bytes of generated text — roughly 67 Devanagari
-characters. The Hindi reference permits about 450. Real sentences run past 130 characters, so the
-**same sentence takes a different code path depending only on the reference language**: split at
-punctuation, generated independently, cross-faded back at 0.15 s.
-
-**c. Reference truncation, on clips over 15 s only.**
-
-`preprocess_ref_audio_text` clips audio over 15 s and **never truncates `ref_text` to match**. The
-model is told that 13.7 s of audio contains 25 s of transcript. Confirmed by the library's own log
-line `Audio is over 15s, clipping short.`, printed only on the 25 s arm.
-
-### The experiment that separated them
-
-Six arms, same seven sentences, same seed, one variable at a time
-(`colab/indicf5_diagnose.py`, run 2026-09-17).
+**The six-arm experiment** (`colab/indicf5_diagnose.py`, same sentences, same seed, one variable
+at a time):
 
 | arm | asked/natural | got/natural | extra | cer | bad clips |
 |---|---|---|---|---|---|
@@ -257,170 +205,194 @@ Six arms, same seven sentences, same seed, one variable at a time
 | `en25_base` | 1.16 | 1.15 | 0.223 | 0.438 | 3 / 7 |
 
 Correlations across all 42 clips: invented speech against over-allocation **r = +0.58**; against
-chunk count **r = −0.21**; over-allocation against chunk count **r = +0.02**, so the two mechanisms
-were cleanly separated rather than confounded.
+chunk count **r = −0.21**; over-allocation against chunk count **r = +0.02**, so the two were
+cleanly separated rather than confounded.
 
-**Duration over-allocation is the cause.** Correcting it alone takes an English reference from four
-bad clips out of seven to none, and to the same content quality as the Hindi-reference arm.
+Two details confirm the mechanism rather than merely fitting it:
 
-**Chunking is a consequence of the same fault, not an independent one.** `max_chars` exists to keep
-`reference + generated` inside F5-TTS's 25 s training window. With the duration wrong, the longest
-sentence asked for 27.8 s of generation on top of a 10.3 s reference — 38 s, half again past the
-window the model was ever trained on, which is why `en10_one` was the worst arm of the six. With
-the duration corrected, the same sentence needs 13.4 s and totals 23.7 s, so **no split is required
-at all** and the cross-fade seam disappears with it. `en10_both` is the correct configuration, not
-`en10_speed`.
-
-This was corrected by ear after the run. The metric could not separate them — extra 0.037 against
-0.049 — but on the 134-character sentence `en10_speed` splits into two chunks at roughly 5.9 s, and
-that is exactly where a listener reports gibberish in the 4–6 s region of an otherwise clean clip.
-A 0.15 s seam is far too short to move a character error rate.
-
-Two details that confirm the mechanism rather than merely fitting it:
-
-- **`got/natural` tracks `asked/natural` to two decimals in every arm.** The model produces exactly
-  the duration it is handed. It is not drifting or running on; it is filling a slot that is too big.
+- **`got/natural` tracks `asked/natural` to two decimals in every arm.** The model produces
+  exactly the duration it is handed. It is not drifting; it is filling a slot that is too big.
 - **Short sentences suffer most.** At `en10_base` the 42–52 character sentences scored extra 1.10,
-  1.02 and 0.76, while the 115–145 character ones scored 0.02–0.16 — those were the ones chunking
-  happened to split. Real dubbing segments are short, so this is the worst possible distribution.
-
-### The content check has a blind spot: Whisper is a fluency prior
-
-On `en10_base` the 134-character sentence scores extra 0.04 — apparently clean — and is audibly
-full of gibberish. The transcribe-back check catches invented **words**; it does not catch invented
-**sound**. Whisper is trained to emit fluent text and discards non-lexical babble rather than
-transcribing it, so garbled audio can round-trip to a clean transcript. On the short sentences the
-babble happened to be lexical enough to transcribe (`वीर्ड उदे एंस पसे एड़ शे एंड़...`, extra 1.10)
-and the check fired; on the long ones it did not.
-
-**What caught it instead was pace.** That clip reads `got/natural = 2.11`. Because the model fills
-exactly the slot it is given, a pace ratio away from 1.0 is itself a content-integrity signal, and
-on this arm it was the reliable one. Neither check is sufficient alone:
-
-| failure | caught by `extra` | caught by pace |
-|---|---|---|
-| invented words | yes | sometimes |
-| non-lexical babble filling a slot | **no** | yes |
-| cross-fade seam at a chunk boundary | no | no |
-
-The seam has no automatic detector yet. The fix is to remove the seam rather than measure it — with
-the duration corrected, nothing needs splitting.
+  1.02 and 0.76 while the 115–145 character ones scored 0.02–0.16. Real dubbing segments are
+  short, so this is the worst possible distribution.
 
 The four clips whose conditions were untouched between `en10_base` and `en10_one` returned
-byte-identical scores, which is the control on the experiment itself.
+identical scores, which is the control on the experiment itself.
 
-**The 25 s arm is a genuinely separate fault.** It sits at 1.16x — pacing is nearly correct — and
-still invents speech on three clips, one of them cut 60% short. Its measured 0.0412 s/byte lands
-near Hindi's 0.0377 purely because clipping shortened the audio while the transcript stayed whole,
-which quantifies the luck described above. Correcting duration will not fix it; the transcript has
-to be truncated to match the clipped audio, or the reference kept under 15 s.
+### 5b. Chunking is a consequence, not a cause
 
-`speed` and `fix_duration` are both exposed by `infer_batch_process`, so both (a) and the
-allocation half of (c) are correctable from outside the model.
+```
+max_chars = ref_text_bytes / ref_seconds * (25 - ref_seconds)
+```
 
-`colab/indicf5_diagnose.py` separates (a) from (b) by varying one at a time. It patches
-`chunk_text` and `infer_batch_process` as module globals in `f5_tts.infer.utils_infer` and wraps
-`model.sample`, so the durations it reports are the durations the sampler was actually given
-rather than arithmetic reproduced from the source. `tests/test_indicf5_diagnose.py` proves the
-interception works against a pre-bound import, which is the assumption the whole measurement rests
-on.
+Also in bytes. A 10.5 s English reference permits about 200 bytes — roughly 67 Devanagari
+characters — against about 450 for the Hindi one, so sentences past 130 characters get split and
+cross-faded only on the English arm.
 
----
+But `max_chars` exists to keep `reference + generated` inside F5-TTS's **25 s training window**.
+With the duration wrong, the longest sentence asked for 27.8 s of generation on a 10.3 s
+reference — 38 s, half again past the window — which is why `en10_one` was the *worst* arm of the
+six. With the duration corrected the same sentence totals 23.7 s, so nothing needs splitting and
+the seam disappears with it.
 
-## 7b. The prefix is punctuation in the reference transcript
+Chunking neither causes the babbling nor prevents it. Single chunk, always, once duration is right.
 
-Measured 2026-09-17, seven sentences, English reference, corrected duration, single chunk.
+### 5c. Punctuation in the reference transcript — the residual prefix
+
+With duration corrected and a single chunk, one clip in seven still opened with 14 characters of
+invented speech (`पेंट केगे उसे`). Measured 2026-09-17:
 
 | reference transcript | clips with a prefix | extra | cer |
 |---|---|---|---|
 | `So let me tell you what this project actually does. You get a video, lecture and...` | 1 of 7 | 0.049 | 0.114 |
 | `so let me tell you what this project actually does you get a video lecture and...` | **0 of 7** | 0.037 | 0.108 |
 
-Lowercasing and removing punctuation from the reference transcript removes the prefix. Nothing
-else changed: same clip, same sentences, same corrected duration, same seed.
+Lowercasing and removing punctuation removes the prefix. Nothing else changed.
 
-**This was found by accident and the first report of it was wrong.** The second arm was labelled
-`en_deva` and was supposed to be Devanagari — Whisper's `language` argument is a hint, not a
-constraint, and asked to read ten seconds of English "in Hindi" it returned English in Roman
-letters. The verdict named script. 132 Latin characters and 132 Devanagari characters are
-indistinguishable in a report; the byte counts are not, and are now printed for every variant,
-with any arm under 80% Devanagari dropped rather than run under that name.
+Consistent with the mechanism: `infer_batch_process` hands the model `ref_text + gen_text` as one
+sequence and strips exactly `ref_audio_len` frames with **no alignment check behind the slice**.
+Punctuation the speaker did not pause for is text the model must place somewhere, and what does
+not fit inside the conditioned frames is spoken at the start of the kept region.
 
-The mechanism is consistent with everything else here. `infer_batch_process` hands the model
-`ref_text + gen_text` as one sequence and strips exactly `ref_audio_len` frames with no alignment
-check behind the slice. Punctuation the speaker did not pause for is text the model has to place
-somewhere, and what it cannot fit inside the conditioned frames is spoken at the start of the kept
-region — which is where `पेंट केगे उसे` came from.
+**Consequence: transliteration stays out of the pipeline.** IndicXlit was the fallback if
+punctuation had not been the cause. The fix is one call to the normaliser that already exists for
+scoring.
 
-**Consequence: IndicXlit stays out of the pipeline.** Transliterating the reference transcript was
-the fallback if punctuation had not been the cause. It is not needed, and the fix is one call to
-the normaliser that already exists for scoring.
+*Strength of evidence:* one flagged clip going to zero is thin. It is corroborated by `extra` and
+`cer` improving across all seven clips rather than only the flagged one, and worth acting on
+regardless because it costs nothing and removes text the model demonstrably cannot place.
 
-**Strength of evidence.** One flagged clip going to zero is thin on its own. It is corroborated
-by `extra` and `cer` improving across all seven clips rather than only the flagged one, and it is
-worth acting on regardless because stripping punctuation costs nothing and removes text the model
-demonstrably cannot place.
+### 5d. Reference truncation over 15 s — still open
 
----
+`preprocess_ref_audio_text` clips audio over 15 s and **never truncates `ref_text` to match**, so
+the model is told that 13.7 s of audio contains 25 s of transcript. Confirmed by the library's own
+log line `Audio is over 15s, clipping short.`, printed only on the 25 s arm.
 
-## 8. Standing conclusion
+`en25_base` sits at 1.16x — pacing nearly right — and still invents speech on three clips with one
+cut 60% short. Correcting duration does not touch it. **The shipping configuration avoids it by
+keeping the reference under 15 s.**
 
-**Superseded 2026-09-17.** The previous conclusion was that `indicf5 hi_ref_10s` is the only
-shippable configuration, because it was the only one that was simultaneously accurate, correctly
-paced and licensable — and that production would therefore have to record every speaker in Hindi.
+### 5e. The levers
 
-That constraint came from the byte-ratio fault, not from the model. With the duration corrected,
-a **10 s English reference** is clean (0 bad clips of 7) and correctly paced (1.00x natural), at
-the same content quality as the Hindi arm. Recording speakers in Hindi is no longer required.
+`speed` and `fix_duration` are both exposed by `infer_batch_process` and neither requires touching
+the model. `fix_duration` is the better one for this project: dubbing already knows each segment's
+slot, so setting it closes the fit problem and the babbling problem with the same call.
 
-**Measured 2026-09-17.** The corrected English reference ties the Hindi one on identity:
-
-| arm | sim | position | got/natural | prefix | cer |
-|---|---|---|---|---|---|
-| `en_hi` (English reference, corrected) | 0.768 | **93%** | 1.00 | 0.2 s | 0.114 |
-| `hi_hi` (Hindi reference, control) | 0.785 | 86% | 0.97 | 0.0 s | 0.091 |
-
-A difference of −0.017 at 0.7 standard errors — indistinguishable. Both were judged good by ear.
-**The shipping configuration is a 10 s English reference with the duration corrected**, which is
-what production supplies anyway.
-
-The 92% the broken `en_ref_10s` arm scored is not carried forward anywhere: correcting the
-duration changes what the model generates, so that number describes a configuration that no
-longer exists.
-
-**Open:** one clip in seven still opens with a 14-character prefix (`पेंट केगे उसे`), down from
-three seconds on every clip. Keep the reference under 15 s until the transcript-truncation fault
-is fixed.
+`colab/indicf5_diagnose.py` measures from inside the library — it patches `chunk_text` and
+`infer_batch_process` as module globals and wraps `model.sample`, so reported durations are the
+ones the sampler was actually given. `tests/test_indicf5_diagnose.py` proves the interception
+works against a pre-bound import, which is the assumption the whole measurement rests on, and the
+report refuses to print its tables if no call was intercepted.
 
 ---
 
-## 9. Speaking rates and the duration model
+## 6. IndicF5 versus XTTS-v2
+
+Seven Hindi sentences per arm, same sentences, same seed, same speaker encoder scoring both.
+
+| model | arm | sim | se | position | cps | vs natural |
+|---|---|---|---|---|---|---|
+| xtts | en_ref | 0.656 | 0.028 | 77% | 11.5 | 1.06x |
+| xtts | hi_ref | 0.695 | 0.026 | 74% | 11.3 | 1.04x |
+| indicf5 | en_ref_10s | 0.805 | 0.015 | 92% | 5.1 | 0.47x |
+| indicf5 | hi_ref_10s | 0.785 | 0.011 | 86% | 11.1 | 1.03x |
+| indicf5 | en_ref_25s | 0.800 | 0.014 | 97% | 9.4 | 0.87x |
+
+Production-case gap **+0.149 at 4.6 standard errors**. The IndicF5 rows predate the duration fix,
+so their pacing is wrong and two of them were speaking gibberish (§3). The identity ordering
+survived the fix; see §1 for the post-fix numbers.
+
+Length behaviour: XTTS scores 71% under 8 s and 80% at or above. IndicF5 scores 92% and 91% —
+**no length degradation**, which matters because real segments are short.
+
+---
+
+## 7. The four-arm result: cross-lingual transfer is not the bottleneck
+
+XTTS-v2, clean re-recorded references, three sentences per arm.
+
+| arm | greedy | sampled | position |
+|---|---|---|---|
+| `en -> en` | 0.502 | 0.486 | 47% |
+| `hi -> hi` | 0.719 | 0.689 | 72% |
+| `en -> hi` | 0.713 | 0.718 | **78%** |
+| `hi -> en` | 0.553 | 0.532 | 53% |
+
+Holding the spoken language fixed and swapping only the reference language moves the score by
+−0.011 and +0.048 — both inside the within-arm spread of 0.021–0.077, and the second *favours the
+foreign reference*.
+
+**What predicts the score is the language being spoken, not the language cloned from.** Speaking
+English lands near 0.52 from either reference; speaking Hindi near 0.71 from either. XTTS-v2's
+English decoder overwrites speaker identity — the same mechanism as its American accent, measured
+a second way. This removed voice conversion from the shortlist of fixes.
+
+Also from that run:
+
+- **Re-recording the reference moved production `en -> hi` from 48% to 71%** on the same scale,
+  while `en -> en` moved only 42% to 47%. Recording quality was worth more than any parameter
+  touched before or since.
+- Greedy beat sampling on three of four arms and tied on the fourth. `do_sample=False` stays.
+
+---
+
+## 8. The 90% target is inside the ruler's own noise
+
+| target | raw cosine needed | gap from 0.713 |
+|---|---|---|
+| 85% of scale | 0.776 | +0.063 |
+| **90% of scale** | **0.816** | +0.103 |
+
+The cross-language ceiling's four readings were 0.923 / 0.914 / 0.862 / 0.886, a span of 0.061.
+**0.816 sits below the lowest reading of the human against himself.** 85% is the defensible target.
+
+The two complaints that prompted it have different causes:
+
+- *"it matches the voice about 70%"* — timbre. This is what the cosine reads.
+- *"I would not emphasize like this"* — speaking style. **The cosine is nearly blind to it.**
+
+Zero-shot cloning copies vocal tract shape from the reference but takes delivery, emphasis and
+phrasing from the model's own priors. Both are cured by speaker-specific training.
+
+---
+
+## 9. Licensing decides this before quality does
+
+- **XTTS-v2 — CPML, non-commercial.** Coqui is defunct, nobody can now grant commercial terms, and
+  fine-tuned checkpoints inherit the licence. Whatever it scores, it cannot ship. It remains a
+  calibrated baseline only.
+- **IndicF5 — MIT.** 0.4B parameters, 1417 hours of Indian speech, clones from a reference clip
+  plus its transcript. Gated on Hugging Face: the account needs to accept the terms at
+  `huggingface.co/ai4bharat/IndicF5`, and a valid token on an account without access fails
+  identically to no token.
+
+---
+
+## 10. Speaking rates and the duration model
 
 Measured from FLEURS: English **13.13 cps** (n=394), Hindi **10.81 cps** (n=239).
 
-**Open problem, identified and not yet fixed.** XTTS synthesis runs 1.20–1.23x faster than the
-FLEURS human rates that `src/eval/duration_model.py` is fitted on, while the speaker himself is
-only 1.07–1.13x fast. The model therefore predicts slots about 20% longer than XTTS actually
-delivers, which biases length control toward over-short translations. The duration model should be
-recalibrated against synthesized audio, not against FLEURS humans.
+**Open problem.** XTTS synthesis runs 1.20–1.23x faster than the FLEURS human rates that
+`src/eval/duration_model.py` is fitted on, while the speaker himself is only 1.07–1.13x fast. The
+model therefore predicts slots about 20% longer than synthesis actually delivers, biasing length
+control toward over-short translations. It should be recalibrated against synthesized audio.
 
 ---
 
-## 10. Fine-tuning: when, and on what
+## 11. Fine-tuning: when, and on what
 
-**Fine-tune when:** accent preservation is a product requirement; the speaker roster is fixed;
-the content is code-mixed Hinglish; or the target language is undertrained in the base model.
+**Fine-tune when:** accent preservation is a product requirement; the speaker roster is fixed; the
+content is code-mixed Hinglish; or the target language is undertrained in the base model.
 
-**Do not fine-tune when:** the reference is noisy (fix the recording); identity holds in-language
-but collapses cross-language (that pointed at voice conversion, and section 2 ruled it out here);
-the audio does not fit the slot (that is translation length, not the voice); or there is under
-about 10 minutes of clean speech per speaker.
+**Do not fine-tune when:** the reference is noisy (fix the recording — §12); identity holds
+in-language but collapses cross-language (that pointed at voice conversion, and §7 ruled it out
+here); the audio does not fit the slot (that is translation length, not the voice); or there is
+under about 10 minutes of clean speech per speaker.
 
-**Tier 1 — Indic-native and permissive:** IndicF5 (MIT), F5-TTS (MIT), IndicParler-TTS
-(Apache 2.0).
+**Tier 1 — Indic-native and permissive:** IndicF5 (MIT), F5-TTS (MIT), IndicParler-TTS (Apache 2.0).
 **Tier 2:** CosyVoice 2 (Apache 2.0), StyleTTS2 (MIT), Chatterbox (MIT), Orpheus (Apache 2.0).
 **Cheaper path:** RVC (about 10 min per speaker, under an hour on a free T4), OpenVoice v2, seed-vc.
-**Benchmark against but do not fine-tune:** XTTS-v2 (licence dead end), Sarvam Bulbul, ElevenLabs.
+**Benchmark against but do not fine-tune:** XTTS-v2 (licence), Sarvam Bulbul, ElevenLabs.
 **Other stages:** IndicWhisper or a Whisper fine-tune for ASR (try `initial_prompt` first),
 IndicConformer, an IndicTrans2 fine-tune for MT.
 
@@ -429,44 +401,89 @@ seconds currently exist.
 
 ---
 
-## 11. Recording protocol
+## 12. Recording protocol
 
-This produced the single largest measured improvement in the project, so it is written down
-precisely.
+This produced the single largest measured improvement in the project.
 
 Both languages, same speaker, same session, same microphone. A small soft room. 15–20 cm off-axis.
 Never Bluetooth. 44.1 or 48 kHz. Peaks around −6 dB. **Explain to a friend, do not read** — read
 speech gives the wrong prosody to clone from. Leave 10 s of silence, speak, then 5 s of silence.
 
-Measured result: old reference 17.1 dB SNR; new English 30.7 dB; new Hindi 31.4 dB. A 21 dB drop
-in noise floor. ASR word error rate 7.9% normalized, with `fit` heard as `feet` the one real
-content error.
+Measured: old reference 17.1 dB SNR; new English 30.7 dB; new Hindi 31.4 dB — a 21 dB drop in
+noise floor. ASR word error rate 7.9% normalized, with `fit` heard as `feet` the one real content
+error.
 
 ---
 
-## 12. Environment traps that cost real time
+## 13. Environment traps that fail silently
 
-**numpy is squeezed from three sides on the Colab side**, and getting it wrong fails *silently*.
-transformers 4.57 needs >= 2.0, numba (via librosa) needs < 2.3, f5-tts declares <= 1.26.4. The
-first two leave exactly `2.1 <= numpy < 2.3`; f5-tts cannot be satisfied alongside them and its
-declaration is deliberately overridden, so pip prints a conflict for it on every install and that
-is expected output. Install `colab/requirements.txt` **after** IndicF5 so these constraints survive.
+**numpy is squeezed from three sides.** transformers 4.57 needs >= 2.0, numba (via librosa) needs
+< 2.3, f5-tts declares <= 1.26.4. The first two leave exactly `2.1 <= numpy < 2.3`; f5-tts cannot
+be satisfied alongside them and its declaration is deliberately overridden, so pip prints a
+conflict for it on every install and **that is expected output**. Install `colab/requirements.txt`
+**after** IndicF5 so these constraints survive.
 
 Why it is silent: numpy 1.x makes transformers' lazy loader raise an `AttributeError` while
-building its torch-backed classes; the loader **catches it and drops those names**. `import
+building its torch-backed classes, and the loader **catches it and drops those names**. `import
 transformers` then succeeds, the version string is correct, `is_torch_available()` still returns
 True, and the only symptom is `cannot import name 'GPT2PreTrainedModel'` reported from inside
-coqui-tts. A version pin cannot catch this, because the version was never wrong.
+coqui-tts. **A version pin cannot catch this** — the version was never wrong. Check by importing
+the class, not by reading `__version__`.
 
 **IndicF5 loads entirely onto the meta device** under `from_pretrained`, because the failure is
 raised inside the remote `__init__` that transformers runs under an empty-weights context. No
-`from_pretrained` flag reaches it — `low_cpu_mem_usage=False` does not work. The fix is direct
+`from_pretrained` flag reaches it; `low_cpu_mem_usage=False` does not work. The fix is direct
 instantiation via `AutoConfig` plus `get_class_from_dynamic_module`. **The `.to("cuda")` call is
-what caught this**: without it the model would have loaded cleanly and synthesized noise, which
+what caught it** — without it the model would have loaded cleanly and synthesized noise, which
 scores like a model that clones badly and would have been written down as a result.
 `_assert_materialized()` now refuses a model with any parameter still on meta.
 
+**Whisper's `language` argument is a hint, not a constraint.** Asked to read ten seconds of English
+"in Hindi" it returned English in Roman letters. An arm was labelled `en_deva` on that basis and a
+verdict named script. 132 Latin characters and 132 Devanagari characters are indistinguishable in a
+report; the byte counts are not. Always print characters against bytes, and gate on
+`devanagari_fraction()`.
+
 **Whisper transcription of the fixtures is nondeterministic** at default settings and hallucinates
-a repeated tail. `scripts/transcribe_fixtures.py` deliberately bypasses `FasterWhisperBackend`,
-pins `temperature=0.0` and `condition_on_previous_text=False`, and strips repeated phrases up to
-four words long. Verified byte-identical across two runs.
+a repeated tail. `scripts/transcribe_fixtures.py` bypasses `FasterWhisperBackend`, pins
+`temperature=0.0` and `condition_on_previous_text=False`, and strips repeated phrases up to four
+words. Verified byte-identical across two runs.
+
+**Kaggle:** `HF_TOKEN` in the secrets panel is stored and never read — Colab's panel is wired into
+`huggingface_hub` and Kaggle's is not, so a gated download returns a 401 that looks like a
+permissions failure. `/kaggle/working` survives a kernel restart but **not a container
+replacement**, and the next container restores it only from the last saved version's output. See
+`colab/kaggle.md`.
+
+---
+
+## 14. What turned out to be wrong
+
+Kept because a later session finding these cited elsewhere needs to know they do not hold.
+
+| claim | what actually happened |
+|---|---|
+| A good English clone would prove cross-lingual transfer is the bottleneck | Reference language changes the score by −0.011 / +0.048, inside noise. The *spoken* language is what predicts it (§7). |
+| The seven-configuration conditioning sweep found something | The scale spans 0.87 and the whole sweep spanned 0.046. Statistically meaningless; do not cite it. |
+| Gibberish came from the 25 s transcript/audio mismatch | That is one fault, and it does not touch the 10 s arm. The primary cause was duration over-allocation (§5a). |
+| Chunking was protective | It was a consequence of over-allocation. `en10_one` was worst because it blew past the 25 s training window (§5b). |
+| The residual prefix was a cross-fade seam | It survived a single chunk. It was punctuation (§5c). |
+| The prefix was a vocabulary gap — the model has no Latin tokens | 100% coverage; Latin is the largest script in the vocabulary (§4). |
+| Whisper in Hindi mode gives a Devanagari transcript | It returned Latin, and the arm built on it was mislabelled (§13). |
+| `en_en` would discriminate the prefix | IndicF5 cannot generate English, so its transcribe-back is unreadable (§4). |
+
+Two of these were caught by ear rather than by any metric, and one of them — *"for every
+en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
+§5 entirely.
+
+---
+
+## 15. Open
+
+- **Wire IndicF5 in as a pipeline TTS backend.** Needs `reference_text` on `SynthesisSegment`, a
+  bundle version bump, the transcript normaliser applied to the reference, and `fix_duration` from
+  each segment's real slot.
+- **Recalibrate `src/eval/duration_model.py`** against synthesis rather than FLEURS humans (§10).
+- **§5d**, reference transcript truncation over 15 s. Avoided, not fixed.
+- Whisper `initial_prompt` with domain vocabulary for the Indian-accented-English ASR weakness.
+- Trimming silence from reference spans before joining them.
