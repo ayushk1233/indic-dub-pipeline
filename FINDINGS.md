@@ -202,6 +202,49 @@ punctuation, generated independently, cross-faded back at 0.15 s.
 model is told that 13.7 s of audio contains 25 s of transcript. Confirmed by the library's own log
 line `Audio is over 15s, clipping short.`, printed only on the 25 s arm.
 
+### The experiment that separated them
+
+Six arms, same seven sentences, same seed, one variable at a time
+(`colab/indicf5_diagnose.py`, run 2026-09-17).
+
+| arm | asked/natural | got/natural | extra | cer | bad clips |
+|---|---|---|---|---|---|
+| `en10_base` | 2.15 | 2.15 | 0.444 | 0.514 | 4 / 7 |
+| **`en10_speed`** | **1.00** | **0.99** | **0.037** | **0.108** | **0 / 7** |
+| `en10_one` | 2.15 | 2.15 | 0.574 | 0.737 | **6 / 7** |
+| `en10_both` | 1.00 | 1.00 | 0.049 | 0.114 | 0 / 7 |
+| `hi10_base` | 1.06 | 0.97 | 0.011 | 0.091 | 0 / 7 |
+| `en25_base` | 1.16 | 1.15 | 0.223 | 0.438 | 3 / 7 |
+
+Correlations across all 42 clips: invented speech against over-allocation **r = +0.58**; against
+chunk count **r = −0.21**; over-allocation against chunk count **r = +0.02**, so the two mechanisms
+were cleanly separated rather than confounded.
+
+**Duration over-allocation is the cause.** Correcting it alone takes an English reference from four
+bad clips out of seven to none, and to the same content quality as the Hindi-reference arm.
+
+**Chunking is not a cause — it is mildly protective.** Forcing a single chunk while leaving the
+duration wrong made things *worse*, 6 bad clips against 4, because each chunk re-anchors on the
+reference and a split sentence gives the model fewer consecutive seconds of surplus to fill. The
+correlation is negative. My prior that the cross-fade seam was being heard was wrong.
+
+Two details that confirm the mechanism rather than merely fitting it:
+
+- **`got/natural` tracks `asked/natural` to two decimals in every arm.** The model produces exactly
+  the duration it is handed. It is not drifting or running on; it is filling a slot that is too big.
+- **Short sentences suffer most.** At `en10_base` the 42–52 character sentences scored extra 1.10,
+  1.02 and 0.76, while the 115–145 character ones scored 0.02–0.16 — those were the ones chunking
+  happened to split. Real dubbing segments are short, so this is the worst possible distribution.
+
+The four clips whose conditions were untouched between `en10_base` and `en10_one` returned
+byte-identical scores, which is the control on the experiment itself.
+
+**The 25 s arm is a genuinely separate fault.** It sits at 1.16x — pacing is nearly correct — and
+still invents speech on three clips, one of them cut 60% short. Its measured 0.0412 s/byte lands
+near Hindi's 0.0377 purely because clipping shortened the audio while the transcript stayed whole,
+which quantifies the luck described above. Correcting duration will not fix it; the transcript has
+to be truncated to match the clipped audio, or the reference kept under 15 s.
+
 `speed` and `fix_duration` are both exposed by `infer_batch_process`, so both (a) and the
 allocation half of (c) are correctable from outside the model.
 
@@ -216,14 +259,20 @@ on.
 
 ## 8. Standing conclusion
 
-`indicf5 hi_ref_10s` is the only configuration that is simultaneously **accurate** (clean by ear
-and by transcribe-back), **correctly paced** (1.03x natural), and **licensable** (MIT) — and it
-beats XTTS on identity, 86% against 77%.
+**Superseded 2026-09-17.** The previous conclusion was that `indicf5 hi_ref_10s` is the only
+shippable configuration, because it was the only one that was simultaneously accurate, correctly
+paced and licensable — and that production would therefore have to record every speaker in Hindi.
 
-It requires a Hindi reference, which production never supplies. For a fixed roster of speakers,
-recording each person once in Hindi is a one-time per-person cost and makes the duration
-arithmetic self-consistent by construction. For open-ended input, the byte-ratio faults in
-section 7 have to be corrected instead.
+That constraint came from the byte-ratio fault, not from the model. With the duration corrected,
+a **10 s English reference** is clean (0 bad clips of 7) and correctly paced (1.00x natural), at
+the same content quality as the Hindi arm. Recording speakers in Hindi is no longer required.
+
+**Still unmeasured, and required before this ships:** `indicf5_diagnose.py` scores content only.
+Whether the corrected English arm keeps the 92% identity that `en_ref_10s` scored is not known —
+shortening the allocation changes what the model generates, and identity has to be re-measured on
+the corrected configuration through `colab/indicf5_check.py`. Do not quote 92% for the fixed arm.
+
+Keep the reference under 15 s until the transcript-truncation fault is fixed.
 
 ---
 

@@ -1030,3 +1030,41 @@ and the environment traps that fail silently.
   - Numbers only, with the run that produced each one. Conclusions that were retracted are
     recorded as retracted — the cross-lingual prediction and the conditioning sweep — because
     a later session finding them cited elsewhere needs to know they do not hold.
+
+## Step 78 — Phase 4 (model choice) — the English reference babbles because its duration is wrong
+
+Ran the six-arm diagnostic from step 76. Correcting duration alone takes the 10s English
+reference from four bad clips in seven to none, at extra 0.037 against 0.444, and to the same
+content quality as the Hindi arm (cer 0.108 against 0.091). Duration over-allocation is the
+cause.
+
+Chunking is not. Forcing a single chunk while leaving the duration wrong made it **worse** — six
+bad clips against four — and the correlation between invented speech and chunk count is negative
+(r = −0.21) against +0.58 for over-allocation, with the two factors themselves uncorrelated
+(r = +0.02). Splitting a sentence re-anchors each piece on the reference and gives the model
+fewer consecutive surplus seconds to fill, so it was mildly protective. My hypothesis that the
+cross-fade seam was being heard was wrong and is retracted.
+
+**Verification:** `/content/indicf5_diagnose.txt`, 42 clips, transcribe-back scored. The four
+clips whose conditions were identical between `en10_base` and `en10_one` returned identical
+scores, which is the control on the experiment. `got/natural` tracks `asked/natural` to two
+decimals in all six arms, so the model fills exactly the slot it is given rather than running on.
+
+**Deviations:**
+  - No fix landed in this step. The correction is proven as an experimental arm, not as a
+    shipping path, and the choice between a `speed` scalar and `fix_duration` is not neutral:
+    this is a dubbing pipeline that already knows each segment's slot length, so `fix_duration`
+    would close the fit problem and the babbling problem with the same call. That is a design
+    decision about the TTS backend, not a bug fix, and is left for its own step.
+  - Identity is not measured here. `indicf5_diagnose.py` scores content only, and shortening
+    the allocation changes what the model generates, so the 92% that `en_ref_10s` scored cannot
+    be carried over to the corrected arm. It has to be re-measured through
+    `colab/indicf5_check.py` before the arm is called shippable.
+  - The 25s reference fault is confirmed separate and still open. That arm sits at 1.16x, so
+    its pacing is nearly right, and it still invents speech on three clips with one cut 60%
+    short. Its 0.0412 s/byte lands near Hindi's 0.0377 only because clipping shortened the
+    audio while the transcript stayed whole. Correcting duration will not fix it; the
+    transcript must be truncated to match the clipped audio, or the reference kept under 15s.
+  - `FINDINGS.md` section 8 is marked superseded rather than rewritten. The conclusion that
+    production would have to record every speaker in Hindi was a consequence of this fault, not
+    of the model, and the reasoning that led there is worth keeping visible.
