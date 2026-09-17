@@ -60,3 +60,11 @@ htmlcov/
 
 # Misc
 *.tmp
+finetune_plan/
+finetune_plan
+plan.md
+progress.md
+transliteration/
+transliteration
+FINETUNE_PLAN.md
+TRANSLITERATION_PLAN.md
