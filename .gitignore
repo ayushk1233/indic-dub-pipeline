@@ -36,6 +36,10 @@ checkpoints/
 outputs/
 artifacts/
 *.wav
+# Except the recording-session fixtures. Colab reaches them with `git pull`,
+# and 8 MB of derived audio is worth carrying to avoid re-uploading 200 MB of
+# video into every fresh runtime. The .mov sources stay ignored.
+!fixtures/*.wav
 *.mp3
 *.flac
 *.aac
@@ -56,3 +60,11 @@ htmlcov/
 
 # Misc
 *.tmp
+finetune_plan/
+finetune_plan
+plan.md
+progress.md
+transliteration/
+transliteration
+FINETUNE_PLAN.md
+TRANSLITERATION_PLAN.md
