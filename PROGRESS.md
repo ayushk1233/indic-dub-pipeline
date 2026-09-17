@@ -1209,3 +1209,32 @@ transliteration of the English text.
   - `en_deva` keeps the duration correction even though a Devanagari reference transcript would
     make the byte ratio roughly right by itself. Leaving it out would have moved two variables
     between `en_hi` and `en_deva` instead of one.
+
+## Step 83 — Phase 4 (model choice) — a cheaper probe for the last prefix
+
+The corrected English reference ties the Hindi one on identity — 0.768 at 93% of scale against
+0.785 at 86%, a difference of 0.017 at 0.7 standard errors — with correct pace and clean content.
+The constraint that production record every speaker in Hindi is removed. The prefix survives on
+one clip in seven at fourteen characters, down from three seconds on every clip.
+
+`main()` spends most of its wall clock loading XTTS to build the calibrated scale, which the
+prefix question does not need. Added `probe()`: Whisper for the reference transcript, IndicF5 for
+two arms differing only in the script of that transcript, Whisper again to read the result back.
+No XTTS, no calibration, no identity scoring.
+
+**Verification:** `./venv/bin/python -m pytest tests/ -q` — 143 passed.
+
+**Deviations:**
+  - `probe()` regenerates both arms rather than comparing the new one against the previous run's
+    numbers. The seed makes them reproducible and the comparison would almost certainly hold,
+    but a controlled comparison that costs two extra minutes is worth more than an assumption
+    about determinism across kernel restarts.
+  - The English-to-English result is recorded as a limit rather than a defect. IndicF5 declares
+    eleven Indian languages and English is not among them; Whisper looped on five of seven clips,
+    which is a statement about the audio. Its identity figure of 0.754 at 84% of scale is
+    explicitly not a cloning result — it is the documented trap of a timbre-only encoder scoring
+    unintelligible audio, and it is the second time in this project that the highest-looking
+    number came from a broken arm.
+  - Deferred: the run that produced these numbers predates the `en_deva` arm and the loop guard,
+    so its English content columns are artifacts of Whisper's repetition and its
+    "en_en carries the prefix too" verdict is void. Not re-run, because nothing depends on it.

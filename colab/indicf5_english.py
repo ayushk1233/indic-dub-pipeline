@@ -398,3 +398,127 @@ def listen(rows, arms=None, indexes=None):
             elif heard and row.get("cer", 0) > 0.05:
                 print(f"  heard: {heard}")
             display(Audio(str(row["path"])))
+
+
+def probe(sentence_count=7):
+    """
+    Just the prefix question, without paying for the rest of the run.
+
+    main() loads XTTS to build the calibrated scale, which is most of its wall
+    clock and none of its value here: the prefix is a content failure and
+    identity has already been measured. This loads Whisper once for the
+    reference transcript, IndicF5 once for the synthesis, and Whisper again to
+    read the result back.
+
+    Two arms, differing in one thing — the script of the reference transcript.
+    Both are regenerated rather than compared against a previous run's numbers,
+    so the comparison is controlled even though the seed makes it reproducible.
+
+        rows = eng.probe()
+        eng.listen(rows, arms=("en_hi", "en_deva"))
+    """
+    OUT.mkdir(parents=True, exist_ok=True)
+    scripted = json.loads((FIXTURES / "scripted_text.json").read_text(encoding="utf-8"))
+    transcripts = json.loads((FIXTURES / "reference_text.json").read_text(encoding="utf-8"))
+    hindi = sentences(scripted["hi"])[:sentence_count]
+
+    reference = FIXTURES / "english_reference_short.wav"
+    latin = transcripts["english_short"]["text"]
+
+    section("REFERENCE TRANSCRIPTS")
+    deva = hear(reference, "hi")
+    p(f"  latin      {len(latin):>4} chars, {len(latin.encode('utf-8')):>4} bytes")
+    p(f"             {latin}")
+    p(f"  devanagari {len(deva):>4} chars, {len(deva.encode('utf-8')):>4} bytes")
+    p(f"             {deva}")
+    p("")
+    p("  The same ten seconds of English, read by Whisper in Hindi. Not a")
+    p("  transliteration of the spelling — a description of what is on the tape,")
+    p("  in the script the model was trained on.")
+
+    if not deva:
+        p("\n!! empty transcript, nothing to compare")
+        return []
+
+    install_patches()
+    model = load_indicf5()
+
+    rows = []
+    for arm, transcript in (("en_hi", latin), ("en_deva", deva)):
+        p(f"\n--- {arm}")
+        for index, sentence in enumerate(hindi):
+            _mode["speed"] = "auto"
+            _mode["one_chunk"] = True
+            torch.manual_seed(SEED)
+            try:
+                audio = model(sentence, ref_audio_path=str(reference),
+                              ref_text=transcript)
+            except Exception as exc:
+                p(f"    [{index}] FAILED {type(exc).__name__}: {exc}")
+                continue
+
+            wave = as_float_wave(audio)
+            path = OUT / arm / f"{index:02d}.wav"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(str(path), wave, SAMPLE_RATE, subtype="PCM_16")
+
+            rows.append({
+                "arm": arm, "index": index, "text": sentence, "path": path,
+                "language": "hi", "actual_s": len(wave) / SAMPLE_RATE,
+                "natural_s": len(sentence) / NATURAL_CPS_HI,
+                "sim": float("nan"), "pos": float("nan"),
+            })
+            p(f"    [{index}] {rows[-1]['actual_s']:5.2f}s")
+
+    if not rows:
+        return rows
+
+    del model
+    torch.cuda.empty_cache()
+    transcribe_outputs(rows)
+
+    section("PREFIX, BY REFERENCE SCRIPT")
+    p(f"{'arm':<10}{'clips':>7}{'with prefix':>13}{'worst':>8}{'mean lead':>11}"
+      f"{'extra':>8}{'cer':>7}")
+    p("")
+    lead = {}
+    for arm in ("en_hi", "en_deva"):
+        items = [r for r in rows if r["arm"] == arm]
+        if not items:
+            continue
+        flagged = [r for r in items if r.get("lead", 0) > MAX_LEAD]
+        worst = max(items, key=lambda r: r.get("lead_chars", 0))
+        lead[arm] = len(flagged)
+        p(f"{arm:<10}{len(items):>7}{len(flagged):>13}"
+          f"{worst.get('lead_chars', 0):>6} ch{mean(items, 'lead'):>11.3f}"
+          f"{mean(items, 'extra'):>8.3f}{mean(items, 'cer'):>7.3f}")
+        if worst.get("lead_chars"):
+            spoken = (worst.get("heard") or "")[:worst["lead_chars"]]
+            p(f"          [{worst['index']}] opens with {spoken!r}")
+
+    section("VERDICT")
+    if len(lead) == 2:
+        if lead["en_deva"] == 0 < lead["en_hi"]:
+            p("  The script of the reference transcript is the cause. The model")
+            p("  cannot align Latin text to audio, speaks the unconsumed")
+            p("  remainder at the start of the generated region, and stops doing")
+            p("  so the moment the transcript is in a script it can read.")
+            p("")
+            p("  This is a pipeline decision, not a tweak: the reference")
+            p("  transcript should come from an ASR pass in the target script,")
+            p("  which the ASR stage already performs, rather than from the")
+            p("  source-language transcript.")
+        elif lead["en_deva"] >= lead["en_hi"]:
+            p("  Script is not the cause — the prefix survives it, or worsens.")
+            p("  What is left is the reference audio itself: the model cannot")
+            p("  align English speech to any transcript. Shortening the")
+            p("  reference is the next lever, since a shorter clip leaves less")
+            p("  unconsumed text to spill. A Hindi reference remains the only")
+            p("  configuration measured clean.")
+        else:
+            p(f"  Mixed: {lead['en_hi']} against {lead['en_deva']} of "
+              f"{sentence_count}. Too few clips to call. Listen.")
+
+    REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
+    print(f"\nwrote {REPORT}")
+    return rows
