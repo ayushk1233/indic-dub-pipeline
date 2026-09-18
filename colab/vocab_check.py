@@ -103,6 +103,35 @@ def script_of(char):
     return name.split(" ")[0]
 
 
+def stands_alone(char, text):
+    """
+    Is every occurrence of `char` already flanked by whitespace?
+
+    This is the line between a missing token that matters and one that does
+    not, and it is not the line between punctuation and letters.
+
+    An unknown token maps to index 0, which is the space. For a character that
+    already sits between spaces — the em dash in `video — a lecture` — that
+    substitution changes a pause into a slightly different pause, and a pause
+    is what an em dash is *for*. The shipping en -> hi gen text carries six of
+    them (fixtures/scripted_text.json), and that run scored 93% of scale and
+    was judged clean by ear, so this is measured rather than argued.
+
+    A word-internal character is the opposite case. An apostrophe dropping out
+    of "isn't" leaves "isn t" — two words, a pause in the middle of one, and
+    exactly the failure this check exists to catch. Category alone cannot tell
+    those two apart; both are Unicode punctuation.
+    """
+    for index, found in enumerate(text):
+        if found != char:
+            continue
+        before = text[index - 1] if index else " "
+        after = text[index + 1] if index + 1 < len(text) else " "
+        if not (before.isspace() and after.isspace()):
+            return False
+    return True
+
+
 def report(label, text, vocab):
     from f5_tts.model.utils import convert_char_to_pinyin
 
@@ -127,7 +156,7 @@ def report(label, text, vocab):
         print(f"    by script       {dict(scripts)}")
 
     print(f"    first 24        {tokens[:24]}")
-    return len(unknown), len(tokens)
+    return len(unknown), len(tokens), unknown
 
 
 def main():
@@ -181,11 +210,12 @@ def check_arms(arms=("deva_hand",)):
     indistinguishable from IndicF5 being unable to say the word at all, which
     is the one thing the probe exists to measure.
 
-    The hyphen in फोर्टी-सेवन and थर्टी-वन is the specific character to watch:
-    no Devanagari line in any existing fixture contains one, so nothing
-    measured so far says whether it is in vocab. If it is not, it degrades to
-    the spaced form, which is benign — but that is worth knowing rather than
-    assuming.
+    Not every gap is that, though, and the first run of this check found the
+    difference. The hyphen everyone expected to be missing — फोर्टी-सेवन,
+    थर्टी-वन — is in vocabulary. The em dash is not, in both arms of sentence
+    1, and it is harmless: see `stands_alone`. So missing tokens are split by
+    whether they stand between spaces rather than counted, and only the
+    word-internal ones block.
 
     Run before synthesis. Two seconds, no GPU.
 
@@ -205,20 +235,37 @@ def check_arms(arms=("deva_hand",)):
         texts += [(f"{arm}[{s['id']}]", s["devanagari"])
                   for s in data["sentences"]]
 
-    gaps = {}
+    blocking, benign = {}, {}
     for label, text in texts:
-        missing, _ = report(label, text, vocab)
-        if missing:
-            gaps[label] = missing
+        _, _, unknown = report(label, text, vocab)
+        for token in set(unknown):
+            bucket = benign if stands_alone(token, text) else blocking
+            bucket.setdefault(label, Counter())[token] = unknown.count(token)
+
+    def show(rows):
+        for label, counts in rows.items():
+            tokens = ", ".join(f"{t!r}x{n}" for t, n in counts.items())
+            print(f"    {label:<16} {tokens}")
 
     print("\n" + "=" * 70)
-    if not gaps:
+
+    if benign:
+        print("Missing, but already standing between spaces — a pause becomes a")
+        print("slightly different pause, which is what the character is for:")
+        show(benign)
+        print("The shipping en -> hi gen text carries six em dashes and scored")
+        print("93% of scale, so this is measured rather than assumed. Synthesize.")
+
+    if blocking:
+        print("\nMISSING AND WORD-INTERNAL — do not synthesize these rows yet:")
+        show(blocking)
+        print("Each of these splits a word in two and puts a pause inside it.")
+        print("A row listed here cannot be scored for content: the result looks")
+        print("exactly like the model failing at the word.")
+    elif not benign:
         print("Every arm tokenizes fully. Whatever the probe hears is the")
         print("model's handling of the text, not a vocabulary gap.")
     else:
-        print("MISSING TOKENS — do not synthesize these rows yet:")
-        for label, missing in gaps.items():
-            print(f"    {label:<16} {missing} token(s) map to index 0, the space")
-        print("A row listed here cannot be scored for content: the pause it")
-        print("produces looks exactly like the model failing at the word.")
-    return gaps
+        print("\nNothing word-internal is missing. Clear to synthesize.")
+
+    return {"blocking": blocking, "benign": benign}
