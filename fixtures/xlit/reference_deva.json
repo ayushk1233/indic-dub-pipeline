@@ -1,11 +1,11 @@
 {
-  "_note": "The reference TRANSCRIPT in Devanagari, not a set of generated sentences. It has a different shape from deva_hand.json on purpose: one text, corresponding word for word to the Latin reference transcript the probe already passes as ref_text, so a reviewer can read the two columns side by side rather than re-transliterating from scratch. The reference AUDIO does not change and must not — the whole arm is one variable, the script of ref_text. Only two words here are not already reviewed inside deva_hand.json: `so` and `get`; every other word is lifted verbatim from that file, so the review is two words wide and a check that lifting them was right in this context. plain() is applied to the Latin side by the probe (lowercase, strip punctuation — FINDINGS §5c) and is verified to be a no-op on this Devanagari, which carries no punctuation and has no case; that is asserted in tests rather than assumed. Text is NFC-normalised, so ज़ is stored decomposed as ज + U+093C (U+0958..U+095F are Unicode composition exclusions) and precomposed_nukta is empty. Vocabulary coverage has NOT been checked here — run colab/vocab_check.py, which reads this file through check_arms, before synthesis.",
+  "_note": "The reference TRANSCRIPT in Devanagari, not a set of generated sentences. It has a different shape from deva_hand.json on purpose: one text, corresponding word for word to the Latin reference transcript the probe already passes as ref_text, so a reviewer can read the two columns side by side rather than re-transliterating from scratch. The reference AUDIO does not change and must not — the whole arm is one variable, the script of ref_text. REVIEWED by the speaker on 2026-09-18 and synthesized: the two new words were accepted as drafted, and the arm reached the Whisper content floor (FINDINGS §4d). Only two words here were not already reviewed inside deva_hand.json: `so` and `get`; every other word is lifted verbatim from that file, so the review is two words wide and a check that lifting them was right in this context. plain() is applied to the Latin side by the probe (lowercase, strip punctuation — FINDINGS §5c) and is verified to be a no-op on this Devanagari, which carries no punctuation and has no case; that is asserted in tests rather than assumed. Text is NFC-normalised, so ज़ is stored decomposed as ज + U+093C (U+0958..U+095F are Unicode composition exclusions) and precomposed_nukta is empty. Vocabulary coverage was checked through colab/vocab_check.py's check_arms, which reads this file by default, and the arm synthesized clean.",
   "arm": "deva_ref",
   "reference_key": "english_short",
   "reference_file": "english_reference_short.wav",
   "normalization": "NFC",
-  "question": "Does IndicF5's accent come from the spelling of the generated text, or from being handed a reference whose audio and transcript are in different scripts? FINDINGS §4b states both candidates. This arm changes only ref_text and keeps deva_hand's generated sentences, so a difference between deva_hand and deva_ref is attributable to the reference pair and nothing else.",
-  "reviewed": false,
+  "question": "Does IndicF5's accent come from the spelling of the generated text, or from being handed a reference whose audio and transcript are in different scripts? FINDINGS §4b states both candidates. This arm changes only ref_text and keeps deva_hand's generated sentences, so a difference between deva_hand and deva_ref is attributable to the reference pair and nothing else. ANSWERED, but not the question asked: the arm reached the Whisper content floor (0.048 against 0.035) and removed a head-truncation failure §4c had misattributed to duration, while accent remains unmeasured. See FINDINGS §4d.",
+  "reviewed": true,
   "new_words": [
     "सो",
     "गेट"
@@ -21,30 +21,105 @@
   "devanagari_fraction": 1.0,
   "precomposed_nukta": [],
   "alignment": [
-    ["so", "सो"],
-    ["let", "लेट"],
-    ["me", "मी"],
-    ["tell", "टेल"],
-    ["you", "यू"],
-    ["what", "व्हाट"],
-    ["this", "दिस"],
-    ["project", "प्रोजेक्ट"],
-    ["actually", "ऐक्चुअली"],
-    ["does", "डज़"],
-    ["you", "यू"],
-    ["get", "गेट"],
-    ["a", "अ"],
-    ["video", "वीडियो"],
-    ["lecture", "लेक्चर"],
-    ["and", "एंड"],
-    ["interview", "इंटरव्यू"],
-    ["anything", "एनीथिंग"],
-    ["with", "विद"],
-    ["clear", "क्लियर"],
-    ["speech", "स्पीच"],
-    ["and", "एंड"],
-    ["it", "इट"],
-    ["gives", "गिव्ज़"],
-    ["you", "यू"]
+    [
+      "so",
+      "सो"
+    ],
+    [
+      "let",
+      "लेट"
+    ],
+    [
+      "me",
+      "मी"
+    ],
+    [
+      "tell",
+      "टेल"
+    ],
+    [
+      "you",
+      "यू"
+    ],
+    [
+      "what",
+      "व्हाट"
+    ],
+    [
+      "this",
+      "दिस"
+    ],
+    [
+      "project",
+      "प्रोजेक्ट"
+    ],
+    [
+      "actually",
+      "ऐक्चुअली"
+    ],
+    [
+      "does",
+      "डज़"
+    ],
+    [
+      "you",
+      "यू"
+    ],
+    [
+      "get",
+      "गेट"
+    ],
+    [
+      "a",
+      "अ"
+    ],
+    [
+      "video",
+      "वीडियो"
+    ],
+    [
+      "lecture",
+      "लेक्चर"
+    ],
+    [
+      "and",
+      "एंड"
+    ],
+    [
+      "interview",
+      "इंटरव्यू"
+    ],
+    [
+      "anything",
+      "एनीथिंग"
+    ],
+    [
+      "with",
+      "विद"
+    ],
+    [
+      "clear",
+      "क्लियर"
+    ],
+    [
+      "speech",
+      "स्पीच"
+    ],
+    [
+      "and",
+      "एंड"
+    ],
+    [
+      "it",
+      "इट"
+    ],
+    [
+      "gives",
+      "गिव्ज़"
+    ],
+    [
+      "you",
+      "यू"
+    ]
   ]
 }

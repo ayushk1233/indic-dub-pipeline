@@ -236,7 +236,11 @@ Where the 9 comes from is not yet measured, and the two candidates have opposite
 | **The reference pair is script-mismatched.** `ref_text` is Latin, `gen_text` is Devanagari. §4 shows the model has no learned mapping from Latin orthography to English phones, so the reference transcript is close to useless as an alignment anchor: the model has audio at accent 6 and no text it can use to learn what that audio *is*. | Accent transfers in-context from the reference, adapts per speaker for free, and the fix is to give the reference its own Devanagari transcript. |
 
 The discriminating test is one arm: transliterate the reference transcript into Devanagari, change
-nothing else. Until it runs, neither candidate is a finding.
+nothing else. **It has now run — §4d — and it did not settle the accent question.** It settled a
+different one, reaching the Whisper floor on content and removing a failure §4c had misattributed to
+duration. Both accent candidates are still open, and the orthography one gained evidence from a
+different direction: `टेक्स` for `takes` is heard as `text`, because Devanagari has no way to write
+/eɪ/ as distinct from /eː/.
 
 This is also the point where an accent metric stops being optional
 (`TRANSLITERATION_PLAN.md` §3c). The right anchor is not a generic classifier verdict but
@@ -281,9 +285,9 @@ half of what looked like model error was notation.
 voice, correctly transcribed as `31 feet perfectly`. Any arm reported against 0 inherits that as a
 phantom defect.
 
-#### The one real failure: short slots lose their opening words
+#### The remaining failure: short slots lose their opening words
 
-What survives both corrections is a single pattern, consistent across all three seeds:
+What survived both corrections was a single pattern, consistent across all three `deva_hand` seeds:
 
 | id | slot | asked cps | in ref | s0 | s1 | s2 | what is lost |
 |---|---|---|---|---|---|---|---|
@@ -292,23 +296,78 @@ What survives both corrections is a single pattern, consistent across all three 
 | 3 | 8.24 s | 19.4 | no | 0.000 | 0.089 | 0.051 | nothing |
 | 5 | 1.86 s | 13.4 | no | 0.083 | 0.000 | 0.083 | nothing (`fit`/`feet`, same as the floor) |
 
-`missing` is the whole of it on both failing rows and `extra` is 0.000 — the model is not
-babbling, it is starting late. The lost span is at the **head** in every case.
+`missing` is the whole of it on both failing rows and `extra` is 0.000 — the model is not babbling,
+it is starting late, and the lost span is at the **head** in every case.
 
-It is not speaking rate. Sentence 3 is the fastest ask in the set at 19.4 cps and scores 0.000. It
-is not slot length alone: sentence 5 is the shortest slot of all and loses nothing. **It is the two
-together** — a slot short enough that a fixed onset cost is a large fraction of it, carrying enough
-text that there is no silence to give up. The two failures are the two rows that are both short and
-dense; every other row has slack in one dimension or the other.
+It is not speaking rate: sentence 3 is the fastest ask in the set at 19.4 cps and scores 0.000. It
+is not slot length alone: sentence 5 is the shortest slot of all and loses nothing. The two failing
+rows are the only two that are both short and dense, **which is why this was written down as a
+duration problem, and it was wrong.** §4d is what actually caused it.
 
-The floor row settles what this is not. His own reading of sentence 0 fits the whole sentence into
-the same 2.54 s and Whisper gets all of it. The content is physically sayable in the slot; the
-model will not say it. That makes this a property of generation under `fix_duration`, not of the
-transliteration and not of the sentence.
+### 4d. The reference transcript's script was the cause, and it was not an accent question
 
-Untested, and cheap: give sentence 0 a slot of `1.3 × duration_s` and see whether the head returns.
-If it does, short-slot head loss is a duration-allocation problem and belongs with §5a rather than
-with the transliteration work at all.
+Run 2026-09-18 on Kaggle, `probe.main()`, 49 clips, three arms. `deva_ref` is `deva_hand` with one
+thing changed: the reference *transcript* transliterated into Devanagari. Same reference audio, same
+generated sentences, same three seeds, same slots. `fixtures/xlit/reference_deva.json`, reviewed by
+the speaker.
+
+| arm | cer | spread | bad |
+|---|---|---|---|
+| `floor (him)` | **0.035** | — | 1/7 |
+| `deva_hand` | 0.133 | 0.083 | 1–2 of 7 |
+| `deva_ref` | **0.048** | **0.032** | 0–1 of 7 |
+
+**`deva_ref` reaches the floor.** 0.048 against 0.035 is inside what this measurement can see, and
+its best seed is 0.036. Its seed spread is also less than half `deva_hand`'s — the arm is steadier,
+not only better.
+
+The mean gap of 0.085 barely clears the 0.083 spread and **understates the result**, because five of
+the seven sentences were already near the floor and dilute it. The finding is in one row:
+
+| id | `deva_hand` s0/s1/s2 | `deva_ref` s0/s1/s2 |
+|---|---|---|
+| **0** | 0.340 / 0.340 / 0.468 | **0.000 / 0.000 / 0.000** |
+| 4 | 0.157 / 0.196 / 0.176 | 0.196 / 0.000 / 0.078 |
+
+Sentence 0 goes from losing `Let me tell you` on every seed to a perfect transcript on every seed,
+three for three, against a spread of 0.032. The slot never changed. Only `ref_text` did.
+
+So the head loss was never about duration. **It is §5's slice.** `infer_batch_process` conditions on
+the reference, hands the model `ref_text + gen_text` as one sequence, and then strips exactly
+`ref_audio_len` frames off the front with no alignment check. §4 established the model has no usable
+mapping from Latin orthography to English phones, so with a Latin `ref_text` it cannot align the
+transcript to the reference audio and the cut lands in the wrong place — sometimes leaving reference
+speech in front of the content (§5c's residual prefix), sometimes eating the first words of it. One
+cause, two symptoms that look unrelated. Under `fix_duration` the total is pinned, so a misplaced
+cut has to take content rather than add time, which is why this appears as `missing` and never as
+`extra`. *This much is inference from the pattern plus code read in §5, not re-verified here;
+confirming it means instrumenting where the model finishes `ref_text`.*
+
+**The ear agreed with the ruler, for once.** §3b warns that Whisper is a fluency prior and can
+round a garbled clip into a clean sentence, so a low CER is necessary and not sufficient. On this
+run the speaker picked the clips by ear, blind to the table, and named `deva_ref`/s1 best overall,
+`deva_ref`/s0 best on sentence 2, and `deva_ref`/s1 as the only clip anywhere that got `Last week
+the system processed forty-seven segments` right — every other arm dropped `Last` or heard `weak`.
+All three calls match the CER to the row: s1 is the lowest-scoring arm at 0.036 with 0/7 bad, s0
+scores 0.000 on sentence 2 against s1's 0.030, and s1 is the only 0.000 on sentence 4. This does not
+retire the §3b caution, but it is the first run in this project where ear and metric were checked
+against each other and agreed.
+
+Two things this does **not** settle:
+
+- **Accent.** This is what the arm was built to test (§4b) and no number here measures it. The
+  intelligibility result is a by-product.
+- **The orthography still has its own failures.** Sentence 2 was heard as `text` rather than `takes`
+  on several clips. `टेक्स` is the deva_hand spelling, and Devanagari `े` is a pure long /eː/ with no
+  way to write English's /eɪ/ — the vowel is under-specified by the script, not mis-drafted. That is
+  a limitation the reference transliteration cannot fix and belongs to the orthography dials.
+
+**A pipeline consequence, unplanned.** The best clip is not one seed — it is `deva_ref`/s1 for
+sentences 0 and 4 and `deva_ref`/s0 for sentence 2. With a spread of 0.032 and a per-sentence
+winner, generating a few seeds and selecting per segment is a real lever, and the selector already
+exists: the content detectors in §3a rank them without a listener. §8's length-control logic already
+generates six translation candidates and keeps the one that fits; this is the same move one stage
+later.
 
 ---
 
@@ -415,6 +474,12 @@ scoring.
 *Strength of evidence:* one flagged clip going to zero is thin. It is corroborated by `extra` and
 `cer` improving across all seven clips rather than only the flagged one, and worth acting on
 regardless because it costs nothing and removes text the model demonstrably cannot place.
+
+**Later evidence, from the other side of the same slice.** §4d found the mirror image: with a Latin
+`ref_text` the cut also lands *late*, eating the opening words of the generated sentence instead of
+leaving reference speech in front of it. Transliterating the reference transcript removed it. Same
+`ref_audio_len` slice, same missing alignment check, opposite symptom — which means "the model
+cannot place this text" covers both, and punctuation was one instance of it rather than the whole.
 
 ### 5d. Reference truncation over 15 s — still open
 
@@ -656,6 +721,8 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | Any missing vocabulary token invalidates the row | It would have refused the shipping `en -> hi` text, which carries six em dashes and scored 93% of scale. Position decides it, not category (§4a). |
 | `deva_hand` sits about 0.20 CER above a clean transcript | Half of that was `forty-seven` scored against `47`, and the rest was read against zero rather than against his own 0.035. The real gap is 0.098, and most of what remains is two clips (§4c). |
 | Sentence 0 fails because the ask is too fast for the slot | 18.9 cps, and the 19.4 cps sentence scores 0.000. Short **and** dense is the condition; his own recording fits the same words in the same 2.54 s (§4c). |
+| Sentence 0's head loss is a duration problem — short slot, no slack for a fixed onset cost | The slot never changed. Transliterating the *reference transcript* fixed it outright, 0.34 → 0.00 on three of three seeds. It was §5's unaligned slice, not `fix_duration` (§4d). |
+| The accent overshoot needed an accent experiment before anything else | The arm built to test accent answered an intelligibility question instead, and reached the Whisper floor. Accent is still unmeasured (§4d). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
