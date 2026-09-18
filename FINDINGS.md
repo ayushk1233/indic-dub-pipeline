@@ -375,8 +375,9 @@ sentences 0 and 4 and `deva_ref`/s0 for sentence 2. With a spread of 0.032 and a
 winner, generating a few seeds and selecting per segment is a real lever, and the selector already
 exists: the content detectors in §3a rank them without a listener. §8's length-control logic already
 generates six translation candidates and keeps the one that fits; this is the same move one stage
-later. **§4e complicates this: the detectors can select for content and must not be trusted to
-select for accent.**
+later. **§4e sharpens this rather than complicating it: within an arm the detectors pick the seed
+the speaker picks, and across arms they endorsed the one he called unusable. They select for
+content, which is what they measure, and must never be pointed at an accent question.**
 
 ### 4e. The orthography dials improved every metric and destroyed the accent
 
@@ -414,34 +415,54 @@ a long way — but because the directions it can move are not the direction want
 kept in `src/text/en_to_deva.py` with their tests, as a recorded negative result, and removed from
 `DEFAULT_ARMS` so they do not run again.
 
-#### The second divergence, inside one arm
+#### Inside `deva_ref`: the seeds differ on content, not on accent
 
-Within `deva_ref`, the speaker picked **s2** as closest to his own accent — "almost the same". That
-seed is the *worst* of the three on content: cer 0.068 against 0.040 and 0.036, the only one with a
-bad clip, and it carries the 0.231 regression on sentence 1 that §4d flagged.
+Going through the three seeds clip by clip, the speaker reported the accent **the same across all
+three and close to his own**, and chose s1 on the transcripts alone:
 
-So in a single run, across arms the best-scoring is the worst-sounding, and within an arm the
-worst-scoring is the best-sounding. On this evidence CER and accent are uncorrelated at best. Two
-consequences:
+| id | slot | s0 | s1 | s2 |
+|---|---|---|---|---|
+| 4 | 2.86 s | `We click the system process 47 segments` **PREFIX** | `Last week the system processed 47 segments` | `You last week the system processed 47 segments` **PREFIX** |
+| 5 | 1.86 s | `31 feet perfectly` | `31 feet perfectly` | `31 feet perfectly` |
+| 0 | 2.54 s | correct | correct | correct |
 
-- **Accent varies by seed.** It is sampled, not imposed. §4b assumed the 9 was a constant the model
-  applies to everyone; at least some of it is per-generation variation, and one seed in three landed
-  near his own voice with nothing changed but the seed. That is the first evidence in this project
-  that the accent is reachable at all without fine-tuning.
-- **Nothing can select for it.** Seed selection is a real lever (§4d) but the §3a detectors rank
-  content, and ranking on content would have chosen s1 — one of the two that do not sound like him.
-  Picking the accent needs a ruler that reads accent.
+Three things come out of that, and none of them is the one this table was expected to show.
 
-This is the trigger `TRANSLITERATION_PLAN`'s decision table set for §3c, reached from an unexpected
-direction: not "intelligible but not Indian", but "intelligible, Indian on some seeds, and no way to
-tell which without a person listening". **The accent metric is now the blocking piece of work**, and
-its anchor is `fixtures/en_speaker/*.wav` — the same sentences in his own voice — scored the way §2
-scores identity, against his own floor and ceiling rather than an absolute.
+**The ear agreed with the ruler again.** s1 is the lowest-CER `deva_ref` seed at 0.036 with 0/7 bad,
+and it is the one he picked without reference to the numbers. Second instance after §4d, and it
+matters for the opposite reason to §4e: the content detectors rank content correctly, which is
+exactly what they are for. What they cannot do is rank accent (§4e), and the two jobs must not be
+confused.
 
-*Strength of evidence:* one listener, seven sentences, on a voice that is his own — which is the
-only ground truth that exists for "does this sound like me", and not a substitute for the panel in
-§3e. The arm-level judgement was unambiguous and is safe to act on. The s2 observation is a single
-seed and is the reason to build the metric, not a finding on its own.
+**§5c's residual prefix survives the Devanagari reference, on short slots.** Both failing clips on
+sentence 4 open with an invented word — `We click` for `Last week`, and a spurious `You` before
+`last week`. `lead` fires on both. Sentence 4 is the second-shortest slot at 2.86 s, and §4d's
+account of the `ref_audio_len` slice predicts exactly this: a cut that lands early leaves reference
+speech in front of the content, a cut that lands late eats the content's head, and the shorter the
+slot the larger a fixed misplacement is as a fraction of it. The Devanagari reference made the cut
+much more reliable — it removed the head loss entirely — but it did not make it exact.
+
+**`feet` for `fit` is the ruler, not the model.** All three seeds produce it, and so does the
+speaker's own recording: `floor (him)` [5] is cer 0.083 on the identical error. He noticed it
+independently while listening, which is the `floor (him)` row earning its place — without it, that
+0.083 reads as a synthesis defect on every arm.
+
+*Strength of evidence:* one listener, seven sentences, on his own voice — the only ground truth that
+exists for "does this sound like me", and not a substitute for the panel in §3e. The judgement
+against the dials was unambiguous and is acted on.
+
+#### What the accent question still needs
+
+§4b asked whether the accent transfers from the reference. §4d said no, on a comparison of
+`deva_ref` against `deva_hand` that the speaker called unchanged at about 9. Listening again clip by
+clip, he placed `deva_ref` close to his own accent. Those two readings disagree and the second is
+the more careful one, but the difference between them is the difference between shipping this and
+fine-tuning, so it is recorded as open rather than resolved in favour of either. **This is the
+strongest possible argument for §3c**: the decision rests on a judgement that moved between two
+listens of the same audio, and there is no instrument that can be asked instead.
+
+The anchor for that metric is `fixtures/en_speaker/*.wav` — the same sentences in his own voice —
+scored the way §2 scores identity: against his own floor and ceiling rather than an absolute.
 
 ---
 
@@ -799,7 +820,7 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | The accent overshoot needed an accent experiment before anything else | The arm built to test accent answered an intelligibility question instead, and reached the Whisper floor. Accent is still unmeasured (§4d). |
 | The dentalising dials would cost content — written down before the run, so it would be honest | Wrong in sign, not just size. Both dials **beat** the baseline on every content number and produced a Russian-sounding accent. Whisper finds evenly-dentalised English easier to parse than Indian-accented English, so a better CER is what a worse accent looks like (§4e). |
 | Spelling is the lever that sets the accent level | It moves the accent a long way and not toward his. Dental plus initial aspiration is approximately the Slavic profile; accent is not a slider from retroflex to Indian English (§4e). |
-| The imposed accent is a constant the model applies to every speaker | One `deva_ref` seed in three landed near his own accent with nothing changed but the seed. It is sampled, and the seed that sounded best scored worst (§4e). |
+| `deva_ref`/s2 sounded closest to him, so accent varies by seed and cannot be selected on CER | Misread. His s2 remark was about content, and going through the clips he reported the accent the same across all three seeds. He picked s1, which is also the lowest-CER seed — the detectors rank content correctly, which is their job (§4e). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
