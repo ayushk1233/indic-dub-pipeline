@@ -536,6 +536,15 @@ a repeated tail. `scripts/transcribe_fixtures.py` bypasses `FasterWhisperBackend
 `temperature=0.0` and `condition_on_previous_text=False`, and strips repeated phrases up to four
 words. Verified byte-identical across two runs.
 
+**`importlib.reload` does not pick up a `git pull` in a layered import.** It reloads exactly one
+module and leaves that module's imports at whatever revision the kernel first saw.
+`indicf5_xlit_probe` takes `transcribe_outputs` and `ASR_DECODE` from `indicf5_check`, so reloading
+the probe rebinds nothing that matters. Measured 2026-09-18: the decode-parameter fix below was
+committed, pulled and reloaded, and **three further runs reported no content** — the diagnostic
+finally printed the name of a parameter that had not been in the working tree for an hour. Nothing
+in a stale module looks stale: the code is self-consistent, it just is not the code on disk. Use
+`colab/reimport.py::fresh`, which drops every `colab.*` and `src.*` module, or restart the runtime.
+
 **faster-whisper and transformers spell the same decode parameter differently**, and pinning it in
 the wrong dialect voids a whole run without failing it. faster-whisper takes `condition_on_previous_text`;
 transformers takes `condition_on_prev_tokens`. `generate()` declares `**kwargs`, so the wrong name

@@ -82,3 +82,18 @@ def test_greedy_decoding_is_pinned():
     clip disagree and part of any arm difference is decode noise.
     """
     assert check.ASR_DECODE["temperature"] == 0.0
+
+
+def test_the_guard_reports_nothing_for_the_shipping_parameters():
+    """The names on disk must pass the check that runs before every batch."""
+    assert check.unsupported_decode_params() == []
+
+
+def test_the_guard_catches_a_name_generate_does_not_declare(monkeypatch):
+    """
+    The faster-whisper spelling, put back. This is what should have raised
+    once at the top of a run instead of 28 times inside a per-row except.
+    """
+    monkeypatch.setitem(check.ASR_DECODE, FASTER_WHISPER_ONLY, False)
+
+    assert check.unsupported_decode_params() == [FASTER_WHISPER_ONLY]

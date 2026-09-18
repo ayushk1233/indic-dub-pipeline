@@ -214,3 +214,32 @@ def test_a_row_with_no_text_is_reported_rather_than_skipped(monkeypatch):
     assert calls == [], "a row with nothing to score must not reach the ASR"
     assert "no intended text" in rows[0]["asr_error"]
     assert "heard" not in rows[0]
+
+
+def test_purging_drops_this_repo_and_leaves_the_rest():
+    """
+    A `git pull` in a live kernel is only picked up if the whole layer goes.
+    importlib.reload on the top module leaves indicf5_check — where ASR_DECODE
+    lives — at whatever revision the kernel first imported, which is how a
+    parameter fixed four commits earlier kept raising.
+    """
+    import sys
+
+    reimport = pytest.importorskip("colab.reimport")
+
+    import colab.indicf5_check          # noqa: F401  (populate the cache)
+    assert "colab.indicf5_check" in sys.modules
+
+    # purge() mutates the interpreter's module cache, so the rest of the suite
+    # gets it back exactly as it was rather than re-importing at some later,
+    # arbitrary point.
+    saved = dict(sys.modules)
+    try:
+        dropped = reimport.purge()
+
+        assert "colab.indicf5_check" in dropped
+        assert "colab.indicf5_check" not in sys.modules
+        assert "json" in sys.modules, "only this repo's modules should be dropped"
+        assert not any(name.startswith("transformers") for name in dropped)
+    finally:
+        sys.modules.update(saved)

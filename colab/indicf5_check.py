@@ -30,6 +30,7 @@ against its own noise instead of eyeballed.
     check.listen(rows)
 """
 
+import inspect
 import json
 import re
 import time
@@ -303,6 +304,24 @@ def transcript_impossible(heard, path):
     return bool(duration > 0 and len(heard) / duration > LOOP_CPS)
 
 
+def unsupported_decode_params():
+    """
+    Which ASR_DECODE keys the installed Whisper `generate` does not declare.
+
+    `generate` takes **kwargs, so a wrong name is not rejected where it is
+    written — it is forwarded to the model's forward and raises there. Reading
+    the signature is the only way to know before spending a run.
+    """
+    try:
+        from transformers.models.whisper.generation_whisper import (
+            WhisperGenerationMixin)
+    except ImportError:
+        return []
+
+    accepted = set(inspect.signature(WhisperGenerationMixin.generate).parameters)
+    return sorted(set(ASR_DECODE) - accepted)
+
+
 def transcribe_outputs(rows):
     """
     Read every generated clip back and score it against the text asked for.
@@ -315,6 +334,21 @@ def transcribe_outputs(rows):
     arms is Whisper sampling rather than the model — FINDINGS §13.
     """
     from transformers import pipeline
+
+    # Once, loudly, before the loop. A bad key here raises identically on all
+    # 28 clips, and a per-row `except` turns that into a complete report with
+    # no numbers in it and no cause named. Checking against the installed
+    # signature also catches the case that actually happened: the module was
+    # stale in a long-lived notebook kernel, so the name being rejected was one
+    # that had already been fixed on disk.
+    unsupported = unsupported_decode_params()
+    if unsupported:
+        raise RuntimeError(
+            f"ASR_DECODE has {unsupported}, which this transformers does not "
+            f"accept. It would raise once per clip and leave every content "
+            f"metric nan. If that name is not in ASR_DECODE on disk, this "
+            f"module is stale — see colab/reimport.py."
+        )
 
     device = 0 if torch.cuda.is_available() else -1
     asr = pipeline(
