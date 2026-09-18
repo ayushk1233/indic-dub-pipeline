@@ -326,6 +326,11 @@ def transcribe_outputs(rows):
 
     for row in rows:
         if not row.get("text"):
+            # Say so rather than pass over it. A silent skip and a clip the
+            # ASR could not read produce the same nan downstream, and the
+            # difference is the whole diagnosis: one is a broken row, the
+            # other is broken audio.
+            row["asr_error"] = "no intended text on this row; nothing to score"
             continue
         try:
             out = asr(str(row["path"]),

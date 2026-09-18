@@ -144,3 +144,73 @@ def test_rebuilding_ignores_a_directory_with_no_clips(clips):
     (out / "deva_hand_s0").mkdir()
 
     assert {r["arm"] for r in probe._rebuild_rows()} == {"latin"}
+
+
+def test_a_cached_row_missing_its_text_is_refilled(clips):
+    """
+    rows.json is a cache and the fixtures are the truth.
+
+    A row without `text` is not scored and not reported as unscored —
+    transcribe_outputs passes over it — so the whole report comes back nan
+    with no cause named. That happened once already; _hydrate is why it
+    cannot happen from a stale or partial cache.
+    """
+    out = clips(["latin"], indexes=(6,))
+    probe.save_rows([{"arm": "latin", "seed": 0, "label": "latin", "index": 6}])
+
+    rows = probe._hydrate([
+        dict(row, path=out / "latin" / "06.wav")
+        for row in json.loads(probe.ROWS.read_text(encoding="utf-8"))
+    ])
+
+    frozen = json.loads(probe.SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    assert rows[0]["text"] == {e["id"]: e["text"] for e in frozen}[6]
+    assert rows[0]["slot_s"] > 0
+    assert rows[0]["language"] == "en"
+
+
+def test_hydrate_does_not_overwrite_what_the_row_already_has(clips):
+    """A real measured duration must survive; only gaps are filled."""
+    out = clips(["latin"], indexes=(6,))
+    row = {"index": 6, "path": out / "latin" / "06.wav",
+           "text": "kept", "slot_s": 99.0, "in_reference": True}
+
+    probe._hydrate([row])
+
+    assert row["text"] == "kept"
+    assert row["slot_s"] == 99.0
+    assert row["in_reference"] is True
+
+
+def test_a_row_with_no_text_is_reported_rather_than_skipped(monkeypatch):
+    """
+    transcribe_outputs used to `continue` on such a row, leaving no trace at
+    all. A silent skip and unreadable audio both end as nan, and telling them
+    apart is the entire diagnosis — so the row now carries why.
+
+    The ASR is replaced with something that fails loudly if it is ever handed
+    a textless row, which is the other half of the contract.
+    """
+    import sys
+    import types
+
+    check = pytest.importorskip("colab.indicf5_check")
+
+    calls = []
+
+    def fake_pipeline(*args, **kwargs):
+        def run(path, **rest):
+            calls.append(path)
+            return {"text": "should never be reached"}
+        return run
+
+    fake = types.ModuleType("transformers")
+    fake.pipeline = fake_pipeline
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    rows = [{"label": "latin", "index": 0, "text": "", "path": "nowhere.wav"}]
+    check.transcribe_outputs(rows)
+
+    assert calls == [], "a row with nothing to score must not reach the ASR"
+    assert "no intended text" in rows[0]["asr_error"]
+    assert "heard" not in rows[0]

@@ -213,6 +213,81 @@ def _rebuild_rows():
     return rows
 
 
+def _hydrate(rows):
+    """
+    Refill from the fixtures anything a row is missing.
+
+    Every field here has a failure that looks like a model problem. Without
+    `text` the row is skipped and scores nan; without `slot_s` every pace
+    number is wrong; without `in_reference` two rows the model was shown the
+    answer to get read as evidence. None of them raise.
+    """
+    frozen = json.loads(SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    english = {e["id"]: e["text"] for e in frozen}
+    slots = {s["id"]: s for s in
+             json.loads(SLOTS.read_text(encoding="utf-8"))["slots"]}
+
+    for row in rows:
+        index = row["index"]
+        row.setdefault("language", "en")
+        if not row.get("text"):
+            row["text"] = english[index]
+        if not row.get("slot_s"):
+            row["slot_s"] = slots[index]["duration_s"]
+        if "in_reference" not in row:
+            row["in_reference"] = slots[index].get("in_reference", False)
+        if not row.get("actual_s") and Path(row["path"]).exists():
+            row["actual_s"] = sf.info(str(row["path"])).duration
+    return rows
+
+
+def diagnose_asr(rows, index=0):
+    """
+    Try one clip three ways, when the report says nothing was transcribed.
+
+    The three calls separate the causes that produce the same empty string: a
+    clip Whisper genuinely hears nothing in, a language hint that suppresses
+    the output, and a decode parameter that does. Prints what each returns
+    rather than deciding.
+
+        probe.diagnose_asr(rows)
+    """
+    from transformers import pipeline
+
+    from colab.indicf5_check import ASR_DECODE, ASR_MODEL
+
+    row = rows[index]
+    path = Path(row["path"])
+    print(f"clip     {path}")
+    print(f"exists   {path.exists()}")
+    if not path.exists():
+        return
+    info = sf.info(str(path))
+    wave, _ = sf.read(str(path), dtype="float32")
+    print(f"audio    {info.duration:.2f}s, {info.samplerate} Hz, "
+          f"peak {float(np.abs(wave).max()):.4f}, "
+          f"rms {float(np.sqrt((wave ** 2).mean())):.4f}")
+    print(f"asked    {row.get('text')!r}")
+
+    device = 0 if torch.cuda.is_available() else -1
+    asr = pipeline("automatic-speech-recognition", model=ASR_MODEL,
+                   device=device,
+                   torch_dtype=torch.float16 if device == 0 else torch.float32)
+
+    attempts = [
+        ("bare", {}),
+        ("language only", {"language": "en", "task": "transcribe"}),
+        ("as the probe calls it",
+         {"language": "en", "task": "transcribe", **ASR_DECODE}),
+    ]
+    for name, kwargs in attempts:
+        try:
+            out = asr(str(path), generate_kwargs=kwargs) if kwargs else asr(str(path))
+            print(f"  {name:<22} {((out or {}).get('text') or '').strip()!r}")
+        except Exception as exc:
+            print(f"  {name:<22} {type(exc).__name__}: {exc}")
+
+
 def rescore():
     """
     Re-read and re-score clips already on disk. No GPU synthesis, no IndicF5.
@@ -237,6 +312,12 @@ def rescore():
                      / f"{row['index']:02d}.wav") for row in saved]
     else:
         rows = _rebuild_rows()
+
+    # rows.json is a cache; the fixtures are the truth. A row missing the
+    # intended text is not scored and not reported as unscored — it is simply
+    # passed over — so anything the cache lacks is refilled from the source
+    # rather than trusted to be there.
+    rows = _hydrate(rows)
 
     if not rows:
         print(f"!! {OUT} holds no clips. Run main().")
@@ -451,12 +532,37 @@ def report_rows(rows):
     scored = [r for r in rows if np.isfinite(r.get("cer", float("nan")))]
     if not scored:
         section("NOTHING WAS TRANSCRIBED")
-        errors = [r["asr_error"] for r in rows if r.get("asr_error")]
+
+        # Counts, not a conclusion. The first version of this guard said
+        # "every transcript came back empty" when what it had actually
+        # observed was the absence of a number, and the two are different
+        # facts: a row the loop skipped has no `heard` key at all, a row the
+        # ASR returned nothing for has an empty one, and a row that raised has
+        # `asr_error`. Guessing between them cost a round trip.
+        errors = [r for r in rows if r.get("asr_error")]
+        skipped = [r for r in rows if "heard" not in r]
+        empty = [r for r in rows
+                 if "heard" in r and not (r.get("heard") or "").strip()]
+
+        p(f"  {len(rows)} rows: {len(errors)} raised, {len(skipped)} never "
+          f"reached the ASR, {len(empty)} transcribed to nothing")
+        p("")
         if errors:
-            p(f"  {len(errors)} of {len(rows)} clips raised inside the ASR:")
-            p(f"    {errors[0]}")
-        else:
-            p("  Every transcript came back empty, with no exception raised.")
+            p(f"  first error: {errors[0]['asr_error']}")
+        if skipped:
+            row = skipped[0]
+            p("  A skipped row is one transcribe_outputs passed over, which it")
+            p("  does when the row carries no intended text to score against.")
+            p(f"  first skipped: {row['label']} [{row['index']}] "
+              f"text={row.get('text')!r}")
+        if empty:
+            row = empty[0]
+            exists = Path(row["path"]).exists()
+            p(f"  first empty: {row['label']} [{row['index']}] "
+              f"path exists {exists}, "
+              f"{row.get('actual_s', float('nan')):.2f}s, "
+              f"language {row.get('language')!r}")
+            p("  Run probe.diagnose_asr(rows) to try that clip three ways.")
         p("")
         p("  The audio is on disk and is worth listening to — synthesis")
         p("  succeeded and fix_duration was applied. But no content number")
