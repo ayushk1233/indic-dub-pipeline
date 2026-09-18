@@ -23,15 +23,29 @@ Every ट and ड in fixtures/xlit/ was written to spell an English /t/ or /d/ �
 the text is transliterated English throughout, with no Hindi words in it whose
 retroflexes mean something. Do not reuse `dental` on real Hindi.
 
-**Predicted cost, written down before the run rather than after it.** deva_hand
-deliberately spells the eight loanwords the way Hindi text spells them —
-प्रोजेक्ट, वीडियो, सिस्टम — because that is the distribution IndicF5's training
-text contains. `dental` destroys exactly that: सिस्तम, वीदियो and प्रोजेक्त are
-not Hindi words and the model has never seen them. So these arms are expected
-to trade content for accent, and the content gate and the `floor (him)` row are
-what will say how much. An arm that moves the accent to 6 and takes CER from
-0.048 to 0.3 has not solved the problem; §14 exists because this project has
-written down a favourable half of a trade before.
+**REFUTED. FINDINGS §4e.** Both dials ran, both beat every other arm in that run
+on every content number — `deva_dental` at cer 0.034 against the baseline's
+0.048, below even the `floor (him)` row, zero bad clips on all three seeds —
+and both came back in what the speaker described as a Russian or Scouse accent.
+
+The transforms do what they say. The design was wrong. Dental stops with
+word-initial aspiration is a real phonetic profile, roughly the Slavic one, so
+moving off retroflex did not move toward his English; it moved toward somebody
+else's. Accent is not a one-dimensional slider from retroflex to Indian English
+with his 6 somewhere along it.
+
+The module is kept, tested and importable so the negative result is
+reproducible, and is out of the probe's DEFAULT_ARMS so it is not re-run by
+accident. Do not reach for it as an accent lever again without reading §4e.
+
+**The predicted cost was wrong in sign, which is the more interesting half.**
+This docstring previously argued that `dental` would trade content for accent,
+because deva_hand spells the eight loanwords the way Hindi text spells them —
+प्रोजेक्ट, वीडियो, सिस्टम — and सिस्तम and वीदियो are not words IndicF5 has
+seen. CER was predicted to rise. It fell, on all six seeds: Whisper is a
+fluency prior (§3b) and finds evenly-dentalised English *easier* to parse than
+Indian-accented English. A better content score is what a worse accent looked
+like here, so no threshold on these detectors would have caught it.
 
 What is deliberately not here: rhoticity. Post-vocalic र in लॉन्गर and वर्ड्स
 does force a rhotic reading, and it is named in §4b as a third dial, but there

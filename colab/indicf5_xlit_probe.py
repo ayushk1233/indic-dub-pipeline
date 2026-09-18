@@ -87,9 +87,15 @@ HYPOTHESIS_SEEDS = (0, 1, 2)
 # two are read as a pair and both are excluded from the control and the floor.
 HYPOTHESIS_ARMS = ("deva_hand", "deva_ref")
 
-# The accent dials, each on top of `deva_ref` — which §4d established as the
-# better baseline, at the Whisper content floor. One variable from the best
-# known configuration, not from the first one that worked.
+# The accent dials, each on top of `deva_ref`. REFUTED — FINDINGS §4e. Both
+# beat every other arm in the run on every content number, had zero bad clips
+# on all three seeds, and came back in what the speaker described as a Russian
+# or Scouse accent. The dials move the accent a long way and not toward his:
+# dental stops with initial aspiration is approximately the Slavic profile, and
+# accent is not a slider from retroflex to Indian English.
+#
+# Kept runnable, out of DEFAULT_ARMS. The negative result is worth being able
+# to reproduce; spending 42 clips on it again by accident is not.
 #
 # `deva_ref` is the paired comparison for all of them, so it must run whenever
 # they do; an accent dial read against `deva_hand` would be reading two changes.
@@ -99,16 +105,17 @@ DIAL_SEEDS = (0, 1, 2)
 # Every arm that is an arm rather than a ruler, in reading order.
 REPORTED_ARMS = HYPOTHESIS_ARMS + DIAL_ARMS
 
-# What main() runs when it is not told otherwise. `deva_hand` is deliberately
-# absent: §4d settled it against `deva_ref`, which is now the baseline the
-# dials are read against, and re-proving a closed comparison costs 21 clips.
+# What main() runs when it is not told otherwise. Two arms are deliberately
+# absent: `deva_hand`, which §4d settled against `deva_ref`, and the dials,
+# which §4e refuted. Re-proving a closed comparison costs 21 clips and
+# re-proving a refuted one costs 42.
+#
 # `latin` stays at 7 — it is the only thing that shows the content check fires
 # in *this* session, and a clean control means the harness is broken.
 #
-#     probe.main()                                  70 clips
-#     probe.main(only=("latin", "deva_ref"))        the §4d configuration
+#     probe.main()                                  28 clips
 #     probe.main(only=ALL_ARMS)                     everything, 91 clips
-DEFAULT_ARMS = ("latin", "deva_ref") + DIAL_ARMS
+DEFAULT_ARMS = ("latin", "deva_ref")
 ALL_ARMS = ("latin",) + REPORTED_ARMS
 
 # Indian-accented English may come back transcribed in Devanagari — Whisper's
