@@ -43,6 +43,7 @@ Three things are deliberate:
 """
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -146,6 +147,111 @@ def check_text(text):
     if fraction < 0.95:
         problems.append(f"only {fraction:.0%} Devanagari — a word came back in Latin")
     return problems
+
+
+ROWS = OUT / "rows.json"
+
+# Fields worth carrying across a process boundary. `path` is rebuilt from the
+# layout rather than stored, so a zip unpacked somewhere else still resolves.
+SAVED = ("arm", "seed", "label", "index", "text", "given", "language",
+         "actual_s", "slot_s", "natural_s", "requested_s", "in_reference")
+
+
+def save_rows(rows):
+    """Write the synthesis result beside the audio, before transcription."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    ROWS.write_text(json.dumps(
+        [{key: row[key] for key in SAVED if key in row} for row in rows],
+        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _rebuild_rows():
+    """
+    Reconstruct rows from the clips on disk, for a run that saved none.
+
+    The first phase 0 run predates `save_rows`, and its audio is the only copy
+    of an hour of GPU. Everything the report needs is recoverable: the label
+    from the directory name, the sentence id from the filename, the intended
+    English and the slot from the fixtures, and the measured duration from the
+    file itself. `requested_s` is not recoverable, which is why the
+    fix_duration section belongs to `main` and not to `report_rows` — it can
+    only be checked at the moment of generation, and it passed in that run.
+    """
+    frozen = json.loads(SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    english = {e["id"]: e["text"] for e in frozen}
+    slots = {s["id"]: s for s in
+             json.loads(SLOTS.read_text(encoding="utf-8"))["slots"]}
+
+    given = {}
+    for path in sorted(XLIT.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        given[path.stem] = {s["id"]: s["devanagari"] for s in data["sentences"]}
+
+    rows = []
+    for directory in sorted(d for d in OUT.iterdir() if d.is_dir()):
+        # main() writes these as label.replace("/", "_"), so "deva_hand/s0"
+        # becomes "deva_hand_s0" and a single-seed arm stays "latin". Only a
+        # trailing _s<digits> is a seed; the underscore inside "deva_hand" is
+        # part of the arm name.
+        seeded = re.fullmatch(r"(.+)_s(\d+)", directory.name)
+        arm = seeded.group(1) if seeded else directory.name
+        seed = int(seeded.group(2)) if seeded else 0
+        label = f"{arm}/s{seed}" if seeded else arm
+
+        for clip in sorted(directory.glob("*.wav")):
+            index = int(clip.stem)
+            rows.append({
+                "arm": arm, "seed": seed, "label": label,
+                "index": index,
+                "text": english[index],
+                "given": given.get(arm, english)[index],
+                "path": clip, "language": "en",
+                "actual_s": sf.info(str(clip)).duration,
+                "slot_s": slots[index]["duration_s"],
+                "in_reference": slots[index].get("in_reference", False),
+            })
+    return rows
+
+
+def rescore():
+    """
+    Re-read and re-score clips already on disk. No GPU synthesis, no IndicF5.
+
+    Use it when the audio is good and the numbers are not — which is exactly
+    what the first phase 0 run produced. Loads only Whisper, so it costs a
+    couple of minutes rather than most of an hour.
+
+        import colab.indicf5_xlit_probe as probe
+        rows = probe.rescore()
+        probe.listen(rows)
+    """
+    _lines.clear()
+
+    if not OUT.is_dir():
+        print(f"!! no clips under {OUT} — nothing to rescore. Run main().")
+        return []
+
+    if ROWS.exists():
+        saved = json.loads(ROWS.read_text(encoding="utf-8"))
+        rows = [dict(row, path=OUT / row["label"].replace("/", "_")
+                     / f"{row['index']:02d}.wav") for row in saved]
+    else:
+        rows = _rebuild_rows()
+
+    if not rows:
+        print(f"!! {OUT} holds no clips. Run main().")
+        return []
+
+    section("RESCORE — existing clips, no synthesis")
+    p(f"  {len(rows)} clips under {OUT}")
+    p(f"  rows.json {'found' if ROWS.exists() else 'absent, rebuilt from disk'}")
+    p("")
+    p("  fix_duration is not re-checked here. It can only be observed at the")
+    p("  moment of generation, so it belongs to main(); this run inherits")
+    p("  whatever that one reported.")
+
+    transcribe_outputs(rows)
+    return report_rows(rows)
 
 
 def main():
@@ -321,8 +427,21 @@ def main():
 
     del model
     torch.cuda.empty_cache()
+    save_rows(rows)
     transcribe_outputs(rows)
+    return report_rows(rows)
 
+
+def report_rows(rows):
+    """
+    Everything downstream of synthesis, over rows whose audio already exists.
+
+    Split out so `rescore` can run it against clips already on disk. The first
+    phase 0 run produced sound audio and void numbers — the ASR raised on every
+    clip (FINDINGS §13) — and re-synthesizing 28 clips to fix a transcription
+    bug would have spent most of an hour of GPU re-making files that were never
+    wrong.
+    """
     # ------------------------------------------------------- did the ASR run?
     # The same guard the instrumentation gets, for the same reason. A run where
     # nothing transcribed still prints a full CONTENT table, a full SEED SPREAD
