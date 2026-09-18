@@ -102,11 +102,22 @@ ASR_MODEL = "openai/whisper-large-v3-turbo"
 # did not, which made every arm comparison here noisier than it looked.
 # `do_sample=False` is redundant alongside temperature 0.0 and is left out
 # rather than stated twice.
+#
+# The parameter names here are transformers', not faster-whisper's, and the two
+# disagree on the second one. scripts/transcribe_fixtures.py drives
+# faster-whisper and correctly says `condition_on_previous_text`; transformers
+# calls the same thing `condition_on_prev_tokens`. Copying the faster-whisper
+# name into this path does not raise where it is written — it is forwarded to
+# the model as an unknown keyword, the TypeError is caught per row, and the
+# exception text is stored where the transcript should be. It is Latin, so it
+# passes the script gate, and every content metric comes back nan on a run that
+# otherwise looks complete. tests/test_asr_decode_params.py pins the names
+# against the installed signature.
 ASR_DECODE = {
     "temperature": 0.0,
     # The other half of what drives a repetition loop: once the model emits a
     # repeated phrase it conditions on that repetition and continues it.
-    "condition_on_previous_text": False,
+    "condition_on_prev_tokens": False,
 }
 
 # What counts as broken rather than imperfect, as a fraction of the intended
@@ -334,10 +345,23 @@ def transcribe_outputs(rows):
             else:
                 row.update(score_text(row["text"], row["heard"]))
         except Exception as exc:
-            row["heard"] = f"<{type(exc).__name__}: {exc}>"
+            # The error goes in its own field, not into `heard`. Put an
+            # exception string where a transcript belongs and it behaves like
+            # one: it is Latin, so it clears the script gate, and the run
+            # reports nan content for reasons no section explains. A caller
+            # asking "did the ASR run?" needs a field it can test.
+            row["asr_error"] = f"{type(exc).__name__}: {exc}"
+            row["heard"] = ""
             row.update({"cer": float("nan"), "extra": float("nan"),
                         "missing": float("nan"), "lead": float("nan"),
                         "lead_chars": 0})
+
+    failed = [r for r in rows if r.get("asr_error")]
+    if failed:
+        print(f"\n!! {len(failed)} of {len(rows)} clips were never transcribed.")
+        print(f"   {failed[0]['asr_error']}")
+        print("   Every content number from this run is nan for that reason,")
+        print("   not because of anything the model did.")
 
     return rows
 

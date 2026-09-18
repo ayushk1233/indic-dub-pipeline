@@ -495,6 +495,19 @@ a repeated tail. `scripts/transcribe_fixtures.py` bypasses `FasterWhisperBackend
 `temperature=0.0` and `condition_on_previous_text=False`, and strips repeated phrases up to four
 words. Verified byte-identical across two runs.
 
+**faster-whisper and transformers spell the same decode parameter differently**, and pinning it in
+the wrong dialect voids a whole run without failing it. faster-whisper takes `condition_on_previous_text`;
+transformers takes `condition_on_prev_tokens`. `generate()` declares `**kwargs`, so the wrong name
+is not rejected where it is written — it is forwarded to the model's forward and raises there, once
+per clip, inside a per-row `except`. Measured 2026-09-18: the 28-clip transliteration probe ran to
+completion, wrote its audio, confirmed `fix_duration` had been applied, and printed a full report in
+which **every content number was nan**. Because nan compares False against every threshold, each arm
+showed zero bad clips and the `latin` negative control came back "clean" — a report that reads as a
+result. The exception text was being stored in the transcript field, and it is Latin, so it also
+cleared the script gate. `scripts/transcribe_fixtures.py` is faster-whisper and keeps the other
+spelling correctly; the two files disagree on purpose.
+`tests/test_asr_decode_params.py` now checks every key against the installed signature.
+
 **An out-of-vocabulary character is spoken as a pause and nothing raises**, because it maps to
 index 0 and index 0 is the space. It cannot be caught by looking at the audio, the logs or the
 score — only by tokenizing the text against `vocab.txt` first. §4a has the rule for which gaps

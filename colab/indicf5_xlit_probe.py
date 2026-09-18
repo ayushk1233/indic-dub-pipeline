@@ -323,6 +323,28 @@ def main():
     torch.cuda.empty_cache()
     transcribe_outputs(rows)
 
+    # ------------------------------------------------------- did the ASR run?
+    # The same guard the instrumentation gets, for the same reason. A run where
+    # nothing transcribed still prints a full CONTENT table, a full SEED SPREAD
+    # and a VERDICT — every cell nan, every threshold comparison False, so
+    # every arm shows zero bad clips and the `latin` control comes back
+    # "clean". That is a report that reads as a result.
+    scored = [r for r in rows if np.isfinite(r.get("cer", float("nan")))]
+    if not scored:
+        section("NOTHING WAS TRANSCRIBED")
+        errors = [r["asr_error"] for r in rows if r.get("asr_error")]
+        if errors:
+            p(f"  {len(errors)} of {len(rows)} clips raised inside the ASR:")
+            p(f"    {errors[0]}")
+        else:
+            p("  Every transcript came back empty, with no exception raised.")
+        p("")
+        p("  The audio is on disk and is worth listening to — synthesis")
+        p("  succeeded and fix_duration was applied. But no content number")
+        p("  can be computed, so none is printed rather than printed as nan.")
+        p(f"  Clips are under {OUT}.")
+        return rows
+
     # ------------------------------------------------------------ script gate
     section("SCRIPT — is the transcript even in the right alphabet?")
     p("  Whisper's language argument is a hint. Indian-accented English coming")
@@ -389,6 +411,21 @@ def main():
           f"{row.get('extra', float('nan')):>8.3f}"
           f"{row.get('lead', float('nan')):>7.3f}"
           f"{row['actual_s'] / row['slot_s']:>10.2f}")
+
+    # ------------------------------------------------------- what it heard
+    # A CER is a summary of this, and the summary is the part that can be
+    # wrong without looking wrong. Seed 0 only, so it stays readable: the
+    # other seeds are in the report for spread, not for reading.
+    section("WHAT WHISPER HEARD — seed 0")
+    p("  Read it against the intended line. Whisper is a fluency prior and")
+    p("  will round a garbled clip into a clean sentence (FINDINGS §3b), so")
+    p("  a low CER here is necessary and not sufficient. Your ears decide.")
+    for row in [r for r in rows if r["seed"] == 0]:
+        p("")
+        p(f"  {row['label']} [{row['index']}]  cer "
+          f"{row.get('cer', float('nan')):.3f}")
+        p(f"    asked: {row['text']}")
+        p(f"    heard: {(row.get('heard') or '')[:160]}")
 
     # ------------------------------------------------------------ seed spread
     section("SEED SPREAD — the noise floor every later comparison needs")
