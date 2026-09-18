@@ -7,8 +7,8 @@ named. Read this before proposing anything about speaker similarity, reference c
 several of the obvious moves have already been tried and measured, and three of the conclusions in
 here replaced earlier ones that were confidently wrong.
 
-Produced by `colab/four_arm.py`, `colab/indicf5_check.py`, `colab/indicf5_diagnose.py` and
-`colab/indicf5_english.py`.
+Produced by `colab/four_arm.py`, `colab/indicf5_check.py`, `colab/indicf5_diagnose.py`,
+`colab/indicf5_english.py` and `colab/vocab_check.py`.
 
 ---
 
@@ -155,6 +155,52 @@ Latin is nevertheless the largest script in its custom vocabulary (1501 of 2545 
 English transcript tokenizes at 100% coverage, so a vocabulary gap is **not** the explanation.
 
 If English output is ever needed it will not come from this model.
+
+### 4a. What a missing vocabulary token costs, and what it does not
+
+Measured 2026-09-18 on Colab, `colab/vocab_check.py::check_arms`, against the transliteration
+probe's two arms.
+
+**An out-of-vocabulary character does not raise. It maps to index 0, and index 0 is the space.**
+Nothing warns, no audio goes missing, and the model speaks a pause where the character was. That
+is the worst possible failure for this project's purposes, because in a transcribe-back report a
+pause inside a word is indistinguishable from the model being unable to say the word — which is
+the one thing a transliteration arm exists to measure.
+
+The 2545-token vocabulary breaks down as Latin 1501, Hangul 140, **Devanagari 104**, Bengali 82,
+Kannada 79, Oriya 75, Malayalam 73, Telugu 72, Gujarati 70, Cyrillic 66. 104 Devanagari tokens is
+fewer than the Hangul it will never use, and it is still enough: every Devanagari row below
+tokenizes at 100% apart from punctuation.
+
+| text | coverage | missing |
+|---|---|---|
+| `english_short` reference transcript | 135/135 | none |
+| `hindi_short` reference transcript | 104/104 | none |
+| `latin` arm, 6 of 7 sentences | 100% | none |
+| `latin[1]` | 126/128 | em dash ×2 |
+| `deva_hand` arm, 6 of 7 sentences | 100% | none |
+| `deva_hand[1]` | 118/120 | em dash ×2 |
+
+**Both predictions about which character would fail were wrong.** The hyphen in `फोर्टी-सेवन` and
+`थर्टी-वन` was flagged as the unmeasured risk — no Devanagari line in any existing fixture contains
+one — and it is in vocabulary. The em dash is not, and no one had thought to check it, because it
+had been in the shipping gen text all along.
+
+**A missing token is judged by position, not by Unicode category.** The em dash in `video — a
+lecture` already stands between spaces, so substituting a space turns a pause into a slightly
+different pause, which is what an em dash is for. `fixtures/scripted_text.json`'s Hindi gen text
+carries **six em dashes**, and that run scored 93% of scale and was judged clean by ear — so this
+is measured, not argued, and a rule that blocked on any missing token would have refused a run
+already known to be good.
+
+The opposite case is not "letters". An apostrophe is punctuation too, and losing it turns `isn't`
+into `isn t` — a pause inside a word, the failure above exactly. `stands_alone(char, text)` tests
+whether every occurrence is flanked by whitespace, over the whole string, because the substitution
+is global. Only word-internal gaps block.
+
+One asymmetry worth knowing: the tokenizer inserts a space after a **Latin** hyphen (`Thirty-one`
+is 25 characters and 26 tokens) but not after a Devanagari one (`थर्टी-वन` is 23 and 23). Both are
+in vocabulary, so it changes nothing today.
 
 ---
 
@@ -449,6 +495,11 @@ a repeated tail. `scripts/transcribe_fixtures.py` bypasses `FasterWhisperBackend
 `temperature=0.0` and `condition_on_previous_text=False`, and strips repeated phrases up to four
 words. Verified byte-identical across two runs.
 
+**An out-of-vocabulary character is spoken as a pause and nothing raises**, because it maps to
+index 0 and index 0 is the space. It cannot be caught by looking at the audio, the logs or the
+score — only by tokenizing the text against `vocab.txt` first. §4a has the rule for which gaps
+matter; `colab/vocab_check.py::check_arms` runs it before synthesis.
+
 **Kaggle:** `HF_TOKEN` in the secrets panel is stored and never read — Colab's panel is wired into
 `huggingface_hub` and Kaggle's is not, so a gated download returns a 401 that looks like a
 permissions failure. `/kaggle/working` survives a kernel restart but **not a container
@@ -471,6 +522,8 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | The prefix was a vocabulary gap — the model has no Latin tokens | 100% coverage; Latin is the largest script in the vocabulary (§4). |
 | Whisper in Hindi mode gives a Devanagari transcript | It returned Latin, and the arm built on it was mislabelled (§13). |
 | `en_en` would discriminate the prefix | IndicF5 cannot generate English, so its transcribe-back is unreadable (§4). |
+| The hyphen in `फोर्टी-सेवन` is the character to check for vocabulary coverage | It is in vocabulary. The em dash is not, and nobody thought to check it because it was already in the shipping gen text (§4a). |
+| Any missing vocabulary token invalidates the row | It would have refused the shipping `en -> hi` text, which carries six em dashes and scored 93% of scale. Position decides it, not category (§4a). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
