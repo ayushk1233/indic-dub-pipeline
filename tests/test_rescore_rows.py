@@ -282,6 +282,8 @@ def test_rescore_clears_scoring_state_from_a_previous_attempt(clips, monkeypatch
 
     probe.rescore()
 
-    row = seen["rows"][0]
+    # rescore prepends the floor arm, so pick the row this test is about
+    # rather than whichever one happens to be first.
+    row = next(r for r in seen["rows"] if r["arm"] == "latin")
     assert "ValueError" not in (row.get("heard") or "")
     assert row["cer"] == pytest.approx(0.0, abs=0.05)

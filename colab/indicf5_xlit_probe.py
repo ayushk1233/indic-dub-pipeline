@@ -213,6 +213,47 @@ def _rebuild_rows():
     return rows
 
 
+EN_SPEAKER = FIXTURES / "en_speaker"
+
+
+def floor_rows():
+    """
+    His own recordings, scored through the identical path, as the `floor` arm.
+
+    A synthesis CER read against zero is not a measurement. Whisper misreads
+    his real English too — FINDINGS §12 puts word error at 7.9% on this
+    recording — and it misreads it in exactly the places the arms are judged
+    on: `fit` heard as `feet`, `to land` as `two land`, "week" as "weak".
+    Scoring the real clips here puts that number in the same table instead of
+    in a sentence under it telling the reader to go and find it.
+
+    These rows are excluded from the seed spread and the verdict by arm name;
+    they are a ruler, not an arm.
+    """
+    if not EN_SPEAKER.is_dir():
+        return []
+
+    frozen = json.loads(SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    slots = {s["id"]: s for s in
+             json.loads(SLOTS.read_text(encoding="utf-8"))["slots"]}
+
+    rows = []
+    for entry in frozen:
+        path = EN_SPEAKER / f"{entry['id']:02d}.wav"
+        if not path.exists():
+            continue
+        rows.append({
+            "arm": "floor", "seed": 0, "label": "floor (him)",
+            "index": entry["id"],
+            "text": entry["text"], "given": entry["text"],
+            "path": path, "language": "en",
+            "actual_s": sf.info(str(path)).duration,
+            "slot_s": slots[entry["id"]]["duration_s"],
+            "in_reference": slots[entry["id"]].get("in_reference", False),
+        })
+    return rows
+
+
 def _provenance():
     """
     What code is actually running, against what is on disk.
@@ -380,6 +421,7 @@ def rescore():
     p("  moment of generation, so it belongs to main(); this run inherits")
     p("  whatever that one reported.")
 
+    rows = floor_rows() + rows
     transcribe_outputs(rows)
     return report_rows(rows)
 
@@ -561,6 +603,7 @@ def main():
     del model
     torch.cuda.empty_cache()
     save_rows(rows)
+    rows = floor_rows() + rows
     transcribe_outputs(rows)
     return report_rows(rows)
 
@@ -689,10 +732,11 @@ def report_rows(rows):
           f"{len(bad):>5}/{len(items)}")
 
     p("")
-    p("  There is no Whisper floor in this table yet. Transcribe")
-    p("  fixtures/en_speaker/*.wav — his real English — and read the CER column")
-    p("  against that, not against zero. FINDINGS §12 already put word error at")
-    p("  7.9% on this recording, so the floor is not small.")
+    p("  Read every CER against the `floor (him)` row, not against zero. That")
+    p("  row is his own recording of the same seven sentences through this")
+    p("  same Whisper, so it carries the same disagreements the arms are")
+    p("  judged on — `fit` heard as `feet`, `to land` as `two land`. An arm")
+    p("  sitting at the floor is as good as this measurement can see.")
 
     section("BY SENTENCE — and whether it was inside the reference")
     p(f"{'arm':<14}{'id':>3}{'ref':>5}{'cer':>8}{'extra':>8}{'lead':>7}"
@@ -762,6 +806,16 @@ def report_rows(rows):
         p(f"  cer {control['cer']:.3f}. The content check fires in this session.")
 
     p("")
+    floor = table.get("floor (him)")
+    if floor is None:
+        p("  No floor row: fixtures/en_speaker is missing, so every CER below")
+        p("  is being read against zero, which no measurement here supports.")
+    else:
+        p(f"  Floor: his own recording scores cer {floor['cer']:.3f} through")
+        p(f"  this same Whisper, {floor['bad']}/{floor['n']} clips over the")
+        p("  thresholds. That is the number an arm is trying to reach, not 0.")
+
+    p("")
     hand_rows = [table[l] for l in table if l.startswith("deva_hand")]
     if not hand_rows:
         p("  deva_hand did not run. This session answered nothing.")
@@ -804,8 +858,12 @@ def listen(rows, arms=None, indexes=None):
     """
     from IPython.display import Audio, display
 
+    # The floor arm *is* his real recording, and that is already played first
+    # for every sentence. Including it here would play the same clip twice and
+    # invite it to be heard as a generated one.
     picked = [r for r in rows
-              if (arms is None or r["arm"] in arms)
+              if r["arm"] != "floor"
+              and (arms is None or r["arm"] in arms)
               and (indexes is None or r["index"] in indexes)]
 
     for index in sorted({r["index"] for r in picked}):

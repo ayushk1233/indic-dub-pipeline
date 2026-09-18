@@ -43,6 +43,7 @@ import yaml
 from faster_whisper import WhisperModel
 
 from scripts.transcribe_fixtures import DECODE
+from src.text.numbers import spell_numbers
 
 FIXTURES = Path("fixtures")
 SOURCE = FIXTURES / "english_speech.wav"
@@ -78,27 +79,6 @@ def words_of(segments):
     return out
 
 
-_ONES = ("zero one two three four five six seven eight nine ten eleven twelve "
-         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen").split()
-_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
-         "eighty", "ninety")
-_DIGITS = re.compile(r"\d+")
-
-
-def _number_words(value):
-    """47 -> fortyseven. Spelling, not speech: this only has to make two
-    spellings of the same number collide."""
-    if value < 20:
-        return _ONES[value]
-    if value < 100:
-        return _TENS[value // 10] + (_ONES[value % 10] if value % 10 else "")
-    if value < 1000:
-        rest = value % 100
-        return (_ONES[value // 100] + "hundred"
-                + (_number_words(rest) if rest else ""))
-    return str(value)
-
-
 def _key(text):
     """
     What two spellings of the same speech should agree on.
@@ -115,8 +95,7 @@ def _key(text):
     has to decide how an Indian speaker *says* a number; this one only has to
     make two written forms collide.
     """
-    text = text.lower().replace("%", " percent ")
-    text = _DIGITS.sub(lambda m: _number_words(int(m.group())), text)
+    text = spell_numbers(text).lower()
     return "".join(c for c in text if c.isalnum())
 
 

@@ -42,6 +42,7 @@ import torch
 
 from colab import workspace
 from colab.english_report import cosine
+from src.text.numbers import spell_numbers
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -174,8 +175,17 @@ def normalize(text):
 
     Punctuation, case and whitespace differences are not the model saying the
     wrong thing. Devanagari danda counts as punctuation.
+
+    Numbers go too, and they are not a detail. Whisper writes `31`, `47`, `6`
+    and `20%` where the scripted text writes "Thirty-one", "forty-seven",
+    "six" and "twenty percent", and it does so every time rather than
+    sometimes. Measured 2026-09-18: `31 feet perfectly.` scored CER 0.458
+    against "Thirty-one fit perfectly." when the only thing the model got
+    wrong was `feet` for `fit`. Four of the seven probe sentences contain a
+    number, so this was a large part of an arm's headline score.
     """
-    return " ".join(_PUNCT.sub(" ", (text or "").lower()).split())
+    text = spell_numbers(text or "")
+    return " ".join(_PUNCT.sub(" ", text.lower()).split())
 
 
 def align(reference, hypothesis):
