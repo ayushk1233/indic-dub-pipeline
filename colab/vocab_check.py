@@ -197,7 +197,7 @@ def main():
     return results
 
 
-def check_arms(arms=("deva_hand",)):
+def check_arms(arms=("deva_hand", "reference_deva")):
     """
     The same question asked of the text the probe *generates*, not conditions on.
 
@@ -230,10 +230,20 @@ def check_arms(arms=("deva_hand",)):
 
     texts = [(f"latin[{i}]", english[i]) for i in sorted(english)]
     for arm in arms:
-        data = json.loads((FIXTURES / "xlit" / f"{arm}.json")
-                          .read_text(encoding="utf-8"))
-        texts += [(f"{arm}[{s['id']}]", s["devanagari"])
-                  for s in data["sentences"]]
+        path = FIXTURES / "xlit" / f"{arm}.json"
+        if not path.exists():
+            print(f"  -- {path.name} does not exist; skipped")
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if "sentences" in data:
+            texts += [(f"{arm}[{s['id']}]", s["devanagari"])
+                      for s in data["sentences"]]
+        else:
+            # reference_deva.json is one text, not seven, and it is what the
+            # model is *conditioned on* rather than asked to say. A gap there
+            # is the more serious of the two: §4's spillover is what happens
+            # when the model cannot align ref_text to the reference audio.
+            texts.append((f"{arm}[ref]", data["devanagari"]))
 
     blocking, benign = {}, {}
     for label, text in texts:

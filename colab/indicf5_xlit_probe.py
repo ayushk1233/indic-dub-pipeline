@@ -82,6 +82,11 @@ XLIT = FIXTURES / "xlit"
 CONTROL_SEEDS = (0,)
 HYPOTHESIS_SEEDS = (0, 1, 2)
 
+# Arms that are the hypothesis rather than the ruler. `deva_ref` is `deva_hand`
+# with the reference transcript transliterated and nothing else changed, so the
+# two are read as a pair and both are excluded from the control and the floor.
+HYPOTHESIS_ARMS = ("deva_hand", "deva_ref")
+
 # Indian-accented English may come back transcribed in Devanagari — Whisper's
 # `language` is a hint, not a constraint (FINDINGS §13). A transcript in the
 # wrong script scores as all errors, which would read as the model failing when
@@ -140,6 +145,41 @@ def load_arm(name):
     return {s["id"]: s["devanagari"] for s in data["sentences"]}, None
 
 
+REFERENCE_DEVA = XLIT / "reference_deva.json"
+
+# Which xlit fixture supplies an arm's generated text. `deva_ref` reuses
+# deva_hand's sentences unchanged — the only thing it varies is ref_text — so
+# the two arms must never diverge here, or the comparison acquires a second
+# variable without saying so.
+ARM_TEXT = {"deva_hand": "deva_hand", "deva_ref": "deva_hand"}
+
+
+def load_reference_deva():
+    """
+    The reference transcript in Devanagari, for the `deva_ref` arm.
+
+    Reviewed the same way deva_hand is, and refused the same way when it is
+    not. It is a smaller review — 25 words, of which 23 are already reviewed
+    inside deva_hand — but an unreviewed reference would put a drafting error
+    into the conditioning of every clip in the arm rather than into one
+    sentence, which is worse, not better.
+
+    Shape differs from an arm file: one text, not seven, so `load_arm` cannot
+    read it.
+    """
+    if not REFERENCE_DEVA.exists():
+        return None, f"{REFERENCE_DEVA} does not exist"
+
+    data = json.loads(REFERENCE_DEVA.read_text(encoding="utf-8"))
+    if not data.get("reviewed"):
+        return None, (
+            f"{REFERENCE_DEVA.name} is not reviewed. The new words are "
+            f"{data.get('new_words')} — everything else is lifted from "
+            "deva_hand.json. Set reviewed=true once a speaker has read it."
+        )
+    return data, None
+
+
 def check_text(text):
     """Refuse text the model would silently mispronounce or swallow."""
     problems = []
@@ -153,8 +193,9 @@ ROWS = OUT / "rows.json"
 
 # Fields worth carrying across a process boundary. `path` is rebuilt from the
 # layout rather than stored, so a zip unpacked somewhere else still resolves.
-SAVED = ("arm", "seed", "label", "index", "text", "given", "language",
-         "actual_s", "slot_s", "natural_s", "requested_s", "in_reference")
+SAVED = ("arm", "seed", "label", "index", "text", "given", "ref_text",
+         "language", "actual_s", "slot_s", "natural_s", "requested_s",
+         "in_reference")
 
 
 def save_rows(rows):
@@ -185,6 +226,10 @@ def _rebuild_rows():
     given = {}
     for path in sorted(XLIT.glob("*.json")):
         data = json.loads(path.read_text(encoding="utf-8"))
+        # reference_deva.json lives here too and holds one text rather than
+        # seven. Keyed by stem, not by arm: ARM_TEXT maps the arms onto it.
+        if "sentences" not in data:
+            continue
         given[path.stem] = {s["id"]: s["devanagari"] for s in data["sentences"]}
 
     rows = []
@@ -204,7 +249,7 @@ def _rebuild_rows():
                 "arm": arm, "seed": seed, "label": label,
                 "index": index,
                 "text": english[index],
-                "given": given.get(arm, english)[index],
+                "given": given.get(ARM_TEXT.get(arm, arm), english)[index],
                 "path": clip, "language": "en",
                 "actual_s": sf.info(str(clip)).duration,
                 "slot_s": slots[index]["duration_s"],
@@ -311,6 +356,13 @@ def _hydrate(rows):
             row["slot_s"] = slots[index]["duration_s"]
         if "in_reference" not in row:
             row["in_reference"] = slots[index].get("in_reference", False)
+        if not row.get("ref_text") and row.get("arm") == "deva_ref":
+            # Rebuilt from disk, so the conditioning is not recorded on the
+            # row. It is recoverable for this arm and only this arm, because
+            # the fixture is what main() read.
+            deva, _ = load_reference_deva()
+            if deva is not None:
+                row["ref_text"] = plain(deva["devanagari"])
         if not row.get("actual_s") and Path(row["path"]).exists():
             row["actual_s"] = sf.info(str(row["path"])).duration
     return rows
@@ -452,6 +504,7 @@ def main():
 
     english = {e["id"]: e["text"] for e in frozen}
     hand, refusal = load_arm("deva_hand")
+    reference_deva, deva_ref_refusal = load_reference_deva()
 
     section("SETUP")
     for line in _provenance():
@@ -461,6 +514,13 @@ def main():
     p(f"              {len(reference_text)} chars, "
       f"{len(reference_text.encode('utf-8'))} bytes, punctuation stripped")
     p(f"              {reference_text}")
+    if reference_deva is not None:
+        deva_reference_text = plain(reference_deva["devanagari"])
+        p("")
+        p(f"  deva_ref    the same audio, transcript in Devanagari")
+        p(f"              {len(deva_reference_text)} chars, "
+          f"{len(deva_reference_text.encode('utf-8'))} bytes")
+        p(f"              {deva_reference_text}")
     p("")
     p(f"  sentences   {len(frozen)} from {SENTENCES.name}")
     p(f"  slots       his own, sliced from english_speech.wav; "
@@ -472,21 +532,29 @@ def main():
         p("     handed that audio and its transcript, so read those rows apart")
         p("     from the rest — an arm that works only there has shown nothing.")
 
-    arms = [("latin", english, CONTROL_SEEDS)]
+    # (name, generated text per id, seeds, reference transcript)
+    arms = [("latin", english, CONTROL_SEEDS, reference_text)]
     if hand is None:
         p("")
         p(f"  !! deva_hand not run: {refusal}")
         p("     Without it there is no upper bound and this run cannot answer")
         p("     the question it was written for.")
     else:
-        arms.append(("deva_hand", hand, HYPOTHESIS_SEEDS))
+        arms.append(("deva_hand", hand, HYPOTHESIS_SEEDS, reference_text))
+        if reference_deva is None:
+            p("")
+            p(f"  -- deva_ref not run: {deva_ref_refusal}")
+        else:
+            # Same audio, same generated text, same seeds. Only ref_text moves.
+            arms.append(("deva_ref", hand, HYPOTHESIS_SEEDS,
+                         plain(reference_deva["devanagari"])))
 
     section("TEXT GATES — before any synthesis")
     p(f"{'arm':<12}{'id':>3}{'chars':>7}{'bytes':>7}{'deva':>7}{'slot':>7}"
       f"{'asked cps':>11}")
     p("")
     blocked = False
-    for arm, texts, _ in arms:
+    for arm, texts, _, _ in arms:
         for entry in frozen:
             text = texts[entry["id"]]
             slot = slots[entry["id"]]["duration_s"]
@@ -513,7 +581,7 @@ def main():
     model = load_indicf5()
 
     rows = []
-    for arm, texts, seeds in arms:
+    for arm, texts, seeds, arm_reference_text in arms:
         for seed in seeds:
             label = arm if len(seeds) == 1 else f"{arm}/s{seed}"
             p(f"\n--- {label}")
@@ -536,7 +604,7 @@ def main():
                 started = time.perf_counter()
                 try:
                     audio = model(text, ref_audio_path=str(reference_path),
-                                  ref_text=reference_text)
+                                  ref_text=arm_reference_text)
                 except Exception as exc:
                     p(f"    [{sentence_id}] FAILED {type(exc).__name__}: {exc}")
                     continue
@@ -556,6 +624,10 @@ def main():
                     # sentence, not whether the model read the spelling back.
                     "text": english[sentence_id],
                     "given": text,
+                    # deva_hand and deva_ref differ in this field and nothing
+                    # else, so a row that cannot say which it used cannot be
+                    # attributed to an arm after the fact.
+                    "ref_text": arm_reference_text,
                     "path": path, "language": "en",
                     "actual_s": duration,
                     "slot_s": slot,
@@ -767,28 +839,33 @@ def report_rows(rows):
 
     # ------------------------------------------------------------ seed spread
     section("SEED SPREAD — the noise floor every later comparison needs")
-    hypothesis = [r for r in rows if r["arm"] == "deva_hand"]
-    spread = float("nan")
-    if len({r["seed"] for r in hypothesis}) > 1:
+    spreads = {}
+    for arm in HYPOTHESIS_ARMS:
+        hypothesis = [r for r in rows if r["arm"] == arm]
+        if len({r["seed"] for r in hypothesis}) <= 1:
+            continue
         per_seed = {}
         for seed in sorted({r["seed"] for r in hypothesis}):
             items = [r for r in hypothesis if r["seed"] == seed]
             per_seed[seed] = mean(items, "cer")
-            p(f"  seed {seed}   cer {per_seed[seed]:.3f}   "
+            p(f"  {arm:<11} seed {seed}   cer {per_seed[seed]:.3f}   "
               f"{sum(1 for r in items if r.get('cer', 0) > MAX_CER)} over threshold")
         values = [v for v in per_seed.values() if np.isfinite(v)]
-        spread = max(values) - min(values) if len(values) > 1 else float("nan")
+        if len(values) > 1:
+            spreads[arm] = max(values) - min(values)
+            p(f"  {arm:<11} spread {spreads[arm]:.3f} in mean cer across seeds.")
         p("")
-        p(f"  spread {spread:.3f} in mean cer across seeds.")
-        p("")
+
+    spread = max(spreads.values()) if spreads else float("nan")
+    if not spreads:
+        p("  Only one seed ran; the later phases have no noise floor to read")
+        p("  their differences against.")
+    else:
         p("  This is the number that makes phases 1 to 4 readable. FINDINGS §14")
         p("  records a seven-configuration sweep whose entire span was 0.046")
         p("  against a scale spanning 0.87 — meaningless, and it was written")
         p("  down as a finding first. Any arm difference smaller than this")
         p("  spread is not a difference.")
-    else:
-        p("  Only one seed ran; the later phases have no noise floor to read")
-        p("  their differences against.")
 
     # ---------------------------------------------------------------- verdict
     section("VERDICT")
@@ -816,16 +893,34 @@ def report_rows(rows):
         p("  thresholds. That is the number an arm is trying to reach, not 0.")
 
     p("")
-    hand_rows = [table[l] for l in table if l.startswith("deva_hand")]
-    if not hand_rows:
+    arm_cer = {}
+    for arm in HYPOTHESIS_ARMS:
+        arm_rows = [table[l] for l in table if l.split("/")[0] == arm]
+        if not arm_rows:
+            continue
+        worst = max(r["bad"] for r in arm_rows)
+        best = min(r["bad"] for r in arm_rows)
+        arm_cer[arm] = float(np.mean([r["cer"] for r in arm_rows
+                                      if np.isfinite(r["cer"])] or [np.nan]))
+        p(f"  {arm:<11}{best}-{worst} bad clips of {arm_rows[0]['n']} "
+          f"per seed, mean cer {arm_cer[arm]:.3f}")
+
+    if not arm_cer:
         p("  deva_hand did not run. This session answered nothing.")
     else:
-        worst = max(r["bad"] for r in hand_rows)
-        best = min(r["bad"] for r in hand_rows)
-        cer = float(np.mean([r["cer"] for r in hand_rows
-                             if np.isfinite(r["cer"])] or [np.nan]))
-        p(f"  deva_hand  {best}-{worst} bad clips of {hand_rows[0]['n']} "
-          f"per seed, mean cer {cer:.3f}")
+        if {"deva_hand", "deva_ref"} <= set(arm_cer) and np.isfinite(spread):
+            # Same audio, same sentences, same seeds — only ref_text differs,
+            # so this gap is the reference pair and nothing else. Read it
+            # against the spread before reading it at all.
+            gap = abs(arm_cer["deva_ref"] - arm_cer["deva_hand"])
+            p("")
+            p(f"  deva_ref - deva_hand  {gap:.3f} in mean cer, against a seed")
+            p(f"  spread of {spread:.3f}. "
+              + ("Bigger than the noise." if gap > spread
+                 else "Inside the noise — not a difference."))
+            p("  Either way this arm is about accent, which CER does not")
+            p("  measure. The content numbers are here to show it did not")
+            p("  break intelligibility; the answer is in the listening.")
         p("")
         p("  The gate is the continue-the-probe one, not the ship one: content")
         p("  clean, pace near 1.0, and the arm gap bigger than the seed spread.")

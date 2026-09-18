@@ -8,7 +8,7 @@ several of the obvious moves have already been tried and measured, and three of 
 here replaced earlier ones that were confidently wrong.
 
 Produced by `colab/four_arm.py`, `colab/indicf5_check.py`, `colab/indicf5_diagnose.py`,
-`colab/indicf5_english.py` and `colab/vocab_check.py`.
+`colab/indicf5_english.py`, `colab/indicf5_xlit_probe.py` and `colab/vocab_check.py`.
 
 ---
 
@@ -207,10 +207,10 @@ in vocabulary, so it changes nothing today.
 ### 4b. English spelled in Devanagari works — and overshoots the accent
 
 Heard 2026-09-18 on Colab, `colab/indicf5_xlit_probe.py`, 28 clips, seven sentences, `latin`
-against `deva_hand` at three seeds. **This is an ear result and only an ear result.** The run's
-content metrics were all nan for the reason in §13, so there is no CER, no seed spread, and no
-confirmation that the `latin` control failed. Synthesis itself was sound: all 28 clips were asked
-for their own slot within 21 ms, and none came back off-script.
+against `deva_hand` at three seeds. **This section is an ear result**; the numbers arrived
+separately and are in §4c, because the run's content metrics were all nan for the reason in §13 and
+had to be recovered by re-scoring the same audio. Synthesis itself was sound: all 28 clips were
+asked for their own slot within 21 ms, and none came back off-script.
 
 **The hypothesis holds.** Hand-transliterated English in Devanagari comes back as intelligible,
 recognisably Indian-accented English in the cloned voice. The route exists.
@@ -242,6 +242,73 @@ This is also the point where an accent metric stops being optional
 (`TRANSLITERATION_PLAN.md` §3c). The right anchor is not a generic classifier verdict but
 `fixtures/en_speaker/*.wav` — the same sentences, the same speaker, his own accent — scored the way
 §2 scores identity: against his own floor and ceiling rather than against an absolute.
+
+### 4c. The numbers, read against his own recording
+
+Same 28 clips, re-scored rather than re-synthesized (`probe.rescore()`), with the `floor (him)` arm
+added: his own sliced recordings of the same seven sentences, through the same Whisper, in the same
+table. That row is the point of the table. Whisper misreads his real English too, and it misreads it
+in exactly the places the arms are judged on — `fit` heard as `feet`, `to land` as `two land`,
+`week` as `weak` — so a synthesis CER read against zero is not a measurement.
+
+| arm | n | cer | extra | missing | lead | got/slot | bad |
+|---|---|---|---|---|---|---|---|
+| `floor (him)` | 7 | **0.035** | 0.021 | 0.007 | 0.009 | 1.00 | 1/7 |
+| `latin` | 7 | 0.713 | 0.059 | 0.204 | 0.073 | 1.00 | 7/7 |
+| `deva_hand`/s0 | 7 | 0.088 | 0.008 | 0.071 | 0.000 | 1.00 | 1/7 |
+| `deva_hand`/s1 | 7 | 0.171 | 0.011 | 0.152 | 0.000 | 1.00 | 2/7 |
+| `deva_hand`/s2 | 7 | 0.141 | 0.006 | 0.064 | 0.003 | 1.00 | 1/7 |
+
+- **The control fires.** `latin` is 7/7 bad and one of its clips was refused outright by
+  `transcript_impossible` for a repetition loop. §4 is reproduced in this session, so the content
+  check is known to work here rather than assumed to.
+- **Seed spread is 0.083** in mean CER across the three `deva_hand` seeds. The arm gap is **0.58**,
+  an order of magnitude clear of it. This is the first comparison in this project that clears its
+  own noise floor — §14 records one that did not and was written down as a finding anyway.
+- **`deva_hand` sits 0.098 above the floor**, and on its best seed 0.053 above it. Sentence 3 —
+  160 characters at 19.4 cps, outside the reference — came back at **cer 0.000**.
+
+Two corrections to how the earlier numbers read, both in the ruler and not the model:
+
+**Numbers.** `normalize()` compared `forty-seven` against Whisper's `47` as a total mismatch. The
+identical bug had already been found and fixed once in `scripts/slice_english_sentences.py`, and
+was written a second time rather than shared. `src/text/numbers.py` now backs both. Re-scoring seed
+0 through it moved mean CER **0.204 → 0.088** and bad clips **3/7 → 1/7**, with no audio changed:
+id 5 `0.458 → 0.083`, id 4 `0.373 → 0.157`, id 2 `0.112 → 0.007`, id 6 `0.104 → 0.000`. Roughly
+half of what looked like model error was notation.
+
+**The floor is not zero.** `floor (him)` scores 0.035 and has one clip over threshold — his own
+voice, correctly transcribed as `31 feet perfectly`. Any arm reported against 0 inherits that as a
+phantom defect.
+
+#### The one real failure: short slots lose their opening words
+
+What survives both corrections is a single pattern, consistent across all three seeds:
+
+| id | slot | asked cps | in ref | s0 | s1 | s2 | what is lost |
+|---|---|---|---|---|---|---|---|
+| 0 | 2.54 s | 18.9 | yes | 0.340 | 0.340 | 0.468 | `Let me tell you` — the head |
+| 4 | 2.86 s | 18.2 | no | 0.157 | 0.196 | 0.176 | `Last` — the head |
+| 3 | 8.24 s | 19.4 | no | 0.000 | 0.089 | 0.051 | nothing |
+| 5 | 1.86 s | 13.4 | no | 0.083 | 0.000 | 0.083 | nothing (`fit`/`feet`, same as the floor) |
+
+`missing` is the whole of it on both failing rows and `extra` is 0.000 — the model is not
+babbling, it is starting late. The lost span is at the **head** in every case.
+
+It is not speaking rate. Sentence 3 is the fastest ask in the set at 19.4 cps and scores 0.000. It
+is not slot length alone: sentence 5 is the shortest slot of all and loses nothing. **It is the two
+together** — a slot short enough that a fixed onset cost is a large fraction of it, carrying enough
+text that there is no silence to give up. The two failures are the two rows that are both short and
+dense; every other row has slack in one dimension or the other.
+
+The floor row settles what this is not. His own reading of sentence 0 fits the whole sentence into
+the same 2.54 s and Whisper gets all of it. The content is physically sayable in the slot; the
+model will not say it. That makes this a property of generation under `fix_duration`, not of the
+transliteration and not of the sentence.
+
+Untested, and cheap: give sentence 0 a slot of `1.3 × duration_s` and see whether the head returns.
+If it does, short-slot head loss is a duration-allocation problem and belongs with §5a rather than
+with the transliteration work at all.
 
 ---
 
@@ -587,6 +654,8 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | `en_en` would discriminate the prefix | IndicF5 cannot generate English, so its transcribe-back is unreadable (§4). |
 | The hyphen in `फोर्टी-सेवन` is the character to check for vocabulary coverage | It is in vocabulary. The em dash is not, and nobody thought to check it because it was already in the shipping gen text (§4a). |
 | Any missing vocabulary token invalidates the row | It would have refused the shipping `en -> hi` text, which carries six em dashes and scored 93% of scale. Position decides it, not category (§4a). |
+| `deva_hand` sits about 0.20 CER above a clean transcript | Half of that was `forty-seven` scored against `47`, and the rest was read against zero rather than against his own 0.035. The real gap is 0.098, and most of what remains is two clips (§4c). |
+| Sentence 0 fails because the ask is too fast for the slot | 18.9 cps, and the 19.4 cps sentence scores 0.000. Short **and** dense is the condition; his own recording fits the same words in the same 2.54 s (§4c). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
