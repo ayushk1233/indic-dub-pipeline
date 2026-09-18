@@ -87,6 +87,30 @@ HYPOTHESIS_SEEDS = (0, 1, 2)
 # two are read as a pair and both are excluded from the control and the floor.
 HYPOTHESIS_ARMS = ("deva_hand", "deva_ref")
 
+# The accent dials, each on top of `deva_ref` — which §4d established as the
+# better baseline, at the Whisper content floor. One variable from the best
+# known configuration, not from the first one that worked.
+#
+# `deva_ref` is the paired comparison for all of them, so it must run whenever
+# they do; an accent dial read against `deva_hand` would be reading two changes.
+DIAL_ARMS = ("deva_dental", "deva_soft")
+DIAL_SEEDS = (0, 1, 2)
+
+# Every arm that is an arm rather than a ruler, in reading order.
+REPORTED_ARMS = HYPOTHESIS_ARMS + DIAL_ARMS
+
+# What main() runs when it is not told otherwise. `deva_hand` is deliberately
+# absent: §4d settled it against `deva_ref`, which is now the baseline the
+# dials are read against, and re-proving a closed comparison costs 21 clips.
+# `latin` stays at 7 — it is the only thing that shows the content check fires
+# in *this* session, and a clean control means the harness is broken.
+#
+#     probe.main()                                  70 clips
+#     probe.main(only=("latin", "deva_ref"))        the §4d configuration
+#     probe.main(only=ALL_ARMS)                     everything, 91 clips
+DEFAULT_ARMS = ("latin", "deva_ref") + DIAL_ARMS
+ALL_ARMS = ("latin",) + REPORTED_ARMS
+
 # Indian-accented English may come back transcribed in Devanagari — Whisper's
 # `language` is a hint, not a constraint (FINDINGS §13). A transcript in the
 # wrong script scores as all errors, which would read as the model failing when
@@ -151,7 +175,25 @@ REFERENCE_DEVA = XLIT / "reference_deva.json"
 # deva_hand's sentences unchanged — the only thing it varies is ref_text — so
 # the two arms must never diverge here, or the comparison acquires a second
 # variable without saying so.
-ARM_TEXT = {"deva_hand": "deva_hand", "deva_ref": "deva_hand"}
+ARM_TEXT = {"deva_hand": "deva_hand", "deva_ref": "deva_hand",
+            "deva_dental": "deva_hand", "deva_soft": "deva_hand"}
+
+
+def arm_generated_text(arm, base):
+    """
+    What an arm actually asks the model to say, given its source fixture.
+
+    `deva_ref` varies the reference and not the sentences, so it is `base`
+    unchanged. The dial arms are `base` put through one transform from
+    src/text/en_to_deva.py — the text is derived rather than frozen, so an arm
+    is a reviewed fixture plus a named function and the two cannot drift apart
+    in the way two hand-maintained JSON files would.
+    """
+    from src.text.en_to_deva import DIALS
+
+    if arm not in DIALS:
+        return base
+    return {index: DIALS[arm](text) for index, text in base.items()}
 
 
 def load_reference_deva():
@@ -249,7 +291,8 @@ def _rebuild_rows():
                 "arm": arm, "seed": seed, "label": label,
                 "index": index,
                 "text": english[index],
-                "given": given.get(ARM_TEXT.get(arm, arm), english)[index],
+                "given": arm_generated_text(
+                    arm, given.get(ARM_TEXT.get(arm, arm), english))[index],
                 "path": clip, "language": "en",
                 "actual_s": sf.info(str(clip)).duration,
                 "slot_s": slots[index]["duration_s"],
@@ -478,8 +521,16 @@ def rescore():
     return report_rows(rows)
 
 
-def main():
+def main(only=DEFAULT_ARMS):
+    """
+    Synthesize and report. `only` selects which arms run; see DEFAULT_ARMS.
+
+    Existing clips for arms not selected are left on disk untouched, so a
+    scoped run does not destroy a previous one — but the report covers what
+    this call generated, and `rescore()` is what reads everything present.
+    """
     _lines.clear()
+    only = tuple(only)
 
     for path in (SENTENCES, SLOTS):
         if not path.exists():
@@ -533,21 +584,37 @@ def main():
         p("     from the rest — an arm that works only there has shown nothing.")
 
     # (name, generated text per id, seeds, reference transcript)
-    arms = [("latin", english, CONTROL_SEEDS, reference_text)]
+    arms = []
+    if "latin" in only:
+        arms.append(("latin", english, CONTROL_SEEDS, reference_text))
     if hand is None:
         p("")
         p(f"  !! deva_hand not run: {refusal}")
         p("     Without it there is no upper bound and this run cannot answer")
         p("     the question it was written for.")
     else:
-        arms.append(("deva_hand", hand, HYPOTHESIS_SEEDS, reference_text))
-        if reference_deva is None:
+        if "deva_hand" in only:
+            arms.append(("deva_hand", hand, HYPOTHESIS_SEEDS, reference_text))
+        wanted = [a for a in ("deva_ref",) + DIAL_ARMS if a in only]
+        if wanted and reference_deva is None:
             p("")
-            p(f"  -- deva_ref not run: {deva_ref_refusal}")
-        else:
+            p(f"  -- {wanted} not run: {deva_ref_refusal}")
+        elif wanted:
             # Same audio, same generated text, same seeds. Only ref_text moves.
-            arms.append(("deva_ref", hand, HYPOTHESIS_SEEDS,
-                         plain(reference_deva["devanagari"])))
+            deva_reference = plain(reference_deva["devanagari"])
+            if "deva_ref" in only:
+                arms.append(("deva_ref", hand, HYPOTHESIS_SEEDS, deva_reference))
+            # Each dial on top of deva_ref, which §4d put at the content floor.
+            # They share its reference, so deva_ref is their paired baseline.
+            for dial in (d for d in DIAL_ARMS if d in only):
+                arms.append((dial, arm_generated_text(dial, hand),
+                             DIAL_SEEDS, deva_reference))
+
+            if any(d in only for d in DIAL_ARMS) and "deva_ref" not in only:
+                p("")
+                p("  !! a dial is running without deva_ref, which is the only")
+                p("     baseline it can be read against. Every CER difference")
+                p("     in this run will be against an arm that is not here.")
 
     section("TEXT GATES — before any synthesis")
     p(f"{'arm':<12}{'id':>3}{'chars':>7}{'bytes':>7}{'deva':>7}{'slot':>7}"
@@ -571,6 +638,28 @@ def main():
     p("  about 2.6 bytes a character and Latin one, which is the whole reason")
     p("  the byte-ratio duration formula cannot be trusted across scripts and")
     p("  fix_duration is used instead.")
+
+    dialled = [(a, t) for a, t, _, _ in arms if a in DIAL_ARMS]
+    if dialled and hand is not None:
+        section("WHAT THE DIALS CHANGED — read this before spending the GPU")
+        p("  The dial arms are not hand-written. They are src/text/en_to_deva.py")
+        p("  applied to the deva_hand you reviewed, so what the model is asked")
+        p("  to say is printed here rather than frozen into a file nobody reads.")
+        p("")
+        p("  Expect a content cost. deva_hand spells the loanwords the way Hindi")
+        p("  text spells them — प्रोजेक्ट, वीडियो, सिस्टम — because that is the")
+        p("  distribution IndicF5 was trained on, and `dental` destroys exactly")
+        p("  that. An arm that reaches accent 6 and takes cer from 0.048 to 0.3")
+        p("  has not solved the problem.")
+        for arm, texts in dialled:
+            p(f"\n--- {arm}")
+            for entry in frozen:
+                before, after = hand[entry["id"]], texts[entry["id"]]
+                if before == after:
+                    p(f"  [{entry['id']}] unchanged")
+                    continue
+                p(f"  [{entry['id']}] {before}")
+                p(f"      -> {after}")
 
     if blocked:
         p("")
@@ -840,7 +929,7 @@ def report_rows(rows):
     # ------------------------------------------------------------ seed spread
     section("SEED SPREAD — the noise floor every later comparison needs")
     spreads = {}
-    for arm in HYPOTHESIS_ARMS:
+    for arm in REPORTED_ARMS:
         hypothesis = [r for r in rows if r["arm"] == arm]
         if len({r["seed"] for r in hypothesis}) <= 1:
             continue
@@ -894,7 +983,7 @@ def report_rows(rows):
 
     p("")
     arm_cer = {}
-    for arm in HYPOTHESIS_ARMS:
+    for arm in REPORTED_ARMS:
         arm_rows = [table[l] for l in table if l.split("/")[0] == arm]
         if not arm_rows:
             continue
@@ -921,6 +1010,22 @@ def report_rows(rows):
             p("  Either way this arm is about accent, which CER does not")
             p("  measure. The content numbers are here to show it did not")
             p("  break intelligibility; the answer is in the listening.")
+
+        baseline = arm_cer.get("deva_ref")
+        dials = [a for a in DIAL_ARMS if a in arm_cer]
+        if dials and baseline is not None and np.isfinite(baseline):
+            p("")
+            p("  Accent dials, against deva_ref — the baseline they are built on:")
+            for dial in dials:
+                cost = arm_cer[dial] - baseline
+                p(f"    {dial:<13}cer {arm_cer[dial]:.3f}   "
+                  f"{cost:+.3f} against deva_ref's {baseline:.3f}")
+            p("")
+            p("  That column is the price, not the result. These arms spell the")
+            p("  loanwords in a way IndicF5 was never trained on, so some content")
+            p("  cost is expected and was written down before the run. What it")
+            p("  bought is the accent, and only your ears read that. A dial that")
+            p("  reaches 6 by breaking the words has not won anything.")
         p("")
         p("  The gate is the continue-the-probe one, not the ship one: content")
         p("  clean, pace near 1.0, and the arm gap bigger than the seed spread.")
