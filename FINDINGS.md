@@ -154,7 +154,9 @@ The output is not accented English. It is not English:
 Latin is nevertheless the largest script in its custom vocabulary (1501 of 2545 tokens) and the
 English transcript tokenizes at 100% coverage, so a vocabulary gap is **not** the explanation.
 
-If English output is ever needed it will not come from this model.
+If English output is ever needed it will not come from this model **in Latin script**. §4b
+qualifies this: the same model produces intelligible English when the same English is spelled in
+Devanagari.
 
 ### 4a. What a missing vocabulary token costs, and what it does not
 
@@ -201,6 +203,45 @@ is global. Only word-internal gaps block.
 One asymmetry worth knowing: the tokenizer inserts a space after a **Latin** hyphen (`Thirty-one`
 is 25 characters and 26 tokens) but not after a Devanagari one (`थर्टी-वन` is 23 and 23). Both are
 in vocabulary, so it changes nothing today.
+
+### 4b. English spelled in Devanagari works — and overshoots the accent
+
+Heard 2026-09-18 on Colab, `colab/indicf5_xlit_probe.py`, 28 clips, seven sentences, `latin`
+against `deva_hand` at three seeds. **This is an ear result and only an ear result.** The run's
+content metrics were all nan for the reason in §13, so there is no CER, no seed spread, and no
+confirmation that the `latin` control failed. Synthesis itself was sound: all 28 clips were asked
+for their own slot within 21 ms, and none came back off-script.
+
+**The hypothesis holds.** Hand-transliterated English in Devanagari comes back as intelligible,
+recognisably Indian-accented English in the cloned voice. The route exists.
+
+**The accent is not the speaker's.** On an informal 1-to-10 scale where 1 is American or British
+and 10 is heavily Indian, the speaker places his own reference recording at about **6** and the
+generated output at about **9** — "the hard t, d especially". The voice is cloned; the accent is
+imposed. Two consequences, and the second is the one that matters:
+
+- A listener comparing dubbed output against the same person's real speech hears a different
+  accent in the right timbre. Nothing in §2's identity scale can see this — it reads timbre, and
+  the timbre is correct.
+- **It does not vary with the speaker.** Someone whose English sits at 4 or 5 would be expected to
+  come back at the same 9, because nothing in the current configuration carries that speaker's
+  accent into the generation. Accent would be a constant the system imposes rather than a property
+  of the person being dubbed, which is the opposite of what dubbing is for.
+
+Where the 9 comes from is not yet measured, and the two candidates have opposite consequences:
+
+| candidate | why it is plausible | if true |
+|---|---|---|
+| **The orthography.** Devanagari forces a choice English does not make: `ट`/`ड` are retroflex, English `/t/` `/d/` are alveolar, and Hindi's plain stops are unaspirated where English aspirates word-initially. `लेट`, `सिस्टम`, `फिट` all spell the hard stop the speaker is hearing. Post-vocalic `र` in `लॉन्गर` and `वर्ड्स` forces full rhoticity. | Accent is a dial on the transliterator and moving it is cheap — but it is one dial for everyone, and it does not track the speaker. |
+| **The reference pair is script-mismatched.** `ref_text` is Latin, `gen_text` is Devanagari. §4 shows the model has no learned mapping from Latin orthography to English phones, so the reference transcript is close to useless as an alignment anchor: the model has audio at accent 6 and no text it can use to learn what that audio *is*. | Accent transfers in-context from the reference, adapts per speaker for free, and the fix is to give the reference its own Devanagari transcript. |
+
+The discriminating test is one arm: transliterate the reference transcript into Devanagari, change
+nothing else. Until it runs, neither candidate is a finding.
+
+This is also the point where an accent metric stops being optional
+(`TRANSLITERATION_PLAN.md` §3c). The right anchor is not a generic classifier verdict but
+`fixtures/en_speaker/*.wav` — the same sentences, the same speaker, his own accent — scored the way
+§2 scores identity: against his own floor and ceiling rather than against an absolute.
 
 ---
 
