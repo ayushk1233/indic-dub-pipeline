@@ -213,6 +213,40 @@ def _rebuild_rows():
     return rows
 
 
+def _provenance():
+    """
+    What code is actually running, against what is on disk.
+
+    Three runs of this probe reported no content because the kernel held a
+    module from before a fix while the working tree held the fix — see
+    colab/reimport.py. Nothing about a stale module looks stale, so the two
+    are printed side by side in every report and the reader can see the
+    mismatch instead of deducing it from a symptom.
+    """
+    import subprocess
+
+    from colab import indicf5_check
+
+    repo = Path(__file__).resolve().parent.parent
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
+    except Exception:
+        head = "unknown"
+
+    unsupported = indicf5_check.unsupported_decode_params()
+    lines = [
+        f"  on disk     git {head}",
+        f"  loaded      ASR_DECODE {indicf5_check.ASR_DECODE}",
+    ]
+    if unsupported:
+        lines.append(f"  !! {unsupported} is not accepted by the installed "
+                     "Whisper. If that name is not in ASR_DECODE on disk, this")
+        lines.append("     kernel is stale — from colab.reimport import fresh")
+    return lines
+
+
 def _hydrate(rows):
     """
     Refill from the fixtures anything a row is missing.
@@ -326,6 +360,21 @@ def rescore():
     section("RESCORE — existing clips, no synthesis")
     p(f"  {len(rows)} clips under {OUT}")
     p(f"  rows.json {'found' if ROWS.exists() else 'absent, rebuilt from disk'}")
+    for line in _provenance():
+        p(line)
+    p("")
+
+    # A stale `heard` from an earlier scoring attempt must not survive into
+    # this one. It is the field every content number is computed from, and a
+    # leftover value is indistinguishable from a fresh transcript in the
+    # report — which is how an exception string from a previous run ended up
+    # being read as an empty transcription three times.
+    for row in rows:
+        row.pop("heard", None)
+        row.pop("asr_error", None)
+        row.pop("asr_looped", None)
+        for key in ("cer", "extra", "missing", "lead", "lead_chars"):
+            row.pop(key, None)
     p("")
     p("  fix_duration is not re-checked here. It can only be observed at the")
     p("  moment of generation, so it belongs to main(); this run inherits")
@@ -363,6 +412,9 @@ def main():
     hand, refusal = load_arm("deva_hand")
 
     section("SETUP")
+    for line in _provenance():
+        p(line)
+    p("")
     p(f"  reference   {REFERENCE}  {reference_seconds:.2f}s")
     p(f"              {len(reference_text)} chars, "
       f"{len(reference_text.encode('utf-8'))} bytes, punctuation stripped")
@@ -543,9 +595,26 @@ def report_rows(rows):
         skipped = [r for r in rows if "heard" not in r]
         empty = [r for r in rows
                  if "heard" in r and not (r.get("heard") or "").strip()]
+        looped = [r for r in rows if r.get("asr_looped")]
 
         p(f"  {len(rows)} rows: {len(errors)} raised, {len(skipped)} never "
-          f"reached the ASR, {len(empty)} transcribed to nothing")
+          f"reached the ASR, {len(empty)} transcribed to nothing, "
+          f"{len(looped)} looped")
+        p("")
+
+        # The transcript itself, verbatim. Every previous version of this guard
+        # printed a count or a category and left the reader to infer the rest,
+        # and each time the inference was wrong. If all four counts above are
+        # zero then every row has a transcript and the scoring is what failed,
+        # and the only way to see which is to look at one.
+        sample = rows[0]
+        p(f"  first row: {sample['label']} [{sample['index']}]")
+        p(f"    asked: {sample.get('text')!r}")
+        p(f"    heard: {(sample.get('heard') or '')[:200]!r}")
+        p(f"    cer:   {sample.get('cer', 'never set')!r}")
+        p("")
+        for line in _provenance():
+            p(line)
         p("")
         if errors:
             p(f"  first error: {errors[0]['asr_error']}")

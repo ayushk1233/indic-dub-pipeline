@@ -243,3 +243,45 @@ def test_purging_drops_this_repo_and_leaves_the_rest():
         assert not any(name.startswith("transformers") for name in dropped)
     finally:
         sys.modules.update(saved)
+
+
+def test_rescore_clears_scoring_state_from_a_previous_attempt(clips, monkeypatch):
+    """
+    `heard` is what every content number is computed from, and a value left
+    over from an earlier attempt is indistinguishable from a fresh transcript
+    in the report. An exception string from a stale module survived three
+    rescores that way, each one reported as "nothing was transcribed".
+    """
+    import sys
+    import types
+
+    # Long enough that the transcript is not rejected as physically impossible:
+    # transcript_impossible refuses anything over LOOP_CPS, and 48 characters
+    # on a one-second clip is 48 cps.
+    out = clips(["latin"], indexes=(6,), seconds=5.0)
+    probe.save_rows([{"arm": "latin", "seed": 0, "label": "latin", "index": 6,
+                      "text": "Seven were impossible, and we had to rewrite them.",
+                      "language": "en", "slot_s": 3.68, "in_reference": False}])
+    # Poison the cache the way a real stale run would have.
+    stale = json.loads(probe.ROWS.read_text(encoding="utf-8"))
+    stale[0]["heard"] = "<ValueError: a name that was fixed three commits ago>"
+    stale[0]["cer"] = None
+    probe.ROWS.write_text(json.dumps(stale), encoding="utf-8")
+
+    seen = {}
+
+    def fake_pipeline(*args, **kwargs):
+        def run(path, **rest):
+            return {"text": "seven were impossible and we had to rewrite them"}
+        return run
+
+    fake = types.ModuleType("transformers")
+    fake.pipeline = fake_pipeline
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    monkeypatch.setattr(probe, "report_rows", lambda rows: seen.setdefault("rows", rows))
+
+    probe.rescore()
+
+    row = seen["rows"][0]
+    assert "ValueError" not in (row.get("heard") or "")
+    assert row["cer"] == pytest.approx(0.0, abs=0.05)
