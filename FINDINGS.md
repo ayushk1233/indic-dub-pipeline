@@ -464,7 +464,51 @@ listens of the same audio, and there is no instrument that can be asked instead.
 The anchor for that metric is `fixtures/en_speaker/*.wav` — the same sentences in his own voice —
 scored the way §2 scores identity: against his own floor and ceiling rather than an absolute.
 
----
+### 4f. Everything measured so far runs on two hand-made files, for one speaker
+
+Stated by the speaker after the §4e run, and it is correct: *"we may have overengineered for my
+voice, we do not know how this will perform for different users."* Plus a priority — **words first,
+accent can be 80%.** Both change what happens next.
+
+The generalisation worry understates the problem. `deva_ref`, the configuration at the content
+floor, needs **two** artifacts that exist for exactly one person and one script:
+
+| artifact | scope | how it was made |
+|---|---|---|
+| `fixtures/xlit/reference_deva.json` | **per speaker** — it is the Devanagari transliteration of *his* reference transcript | drafted by Claude, reviewed by him |
+| `fixtures/xlit/deva_hand.json` | **per sentence** — the seven fixture lines | drafted by Claude, reviewed by him |
+
+So `deva_ref` cannot be run on a second speaker at all, let alone measured. There is no A/B to
+design and no dataset to pull: a new user arrives with a reference clip and an ASR transcript in
+Latin, and the whole §4d result depends on that transcript being in Devanagari. **The
+generalisation test and the shipping path are the same missing piece**, and it is the automatic
+transliterator `TRANSLITERATION_PLAN` §1b describes and this project has never built.
+
+That also removes the objection §4e raised against phase 1. §4e says the content detectors must
+never be pointed at an accent question — and phase 1's five transliterator arms are ranked on
+**words**, which is what those detectors measure and what §4d and §4e both showed them measuring
+correctly. With accent demoted to "80% is fine", CER is the right ruler for that comparison and
+phase 1 is unblocked. The accent metric (§3c) stays necessary for any later accent claim and is no
+longer on the critical path.
+
+**Read the whole probe as single-speaker, single-domain.** Seven sentences, one 10 s reference, one
+voice, one recording session, read from a script the speaker wrote. Every number in §4c to §4e —
+the 0.035 floor, the 0.048, the seed spreads, the arm gaps — is conditional on that. Nothing here
+has been shown to hold for a second speaker, a spontaneous rather than scripted delivery, a
+different microphone, or a reference clip that is not 10 s of clean studio audio. `TRANSLITERATION_PLAN`
+§0 flagged the accent half of this in advance; the content half was not flagged and should have been.
+
+#### The known content defects, which are now the priority
+
+| defect | where | status |
+|---|---|---|
+| Leading invented word on short slots | sentence 4 (2.86 s) on 2 of 3 seeds, `lead` fires | §4e — real, and §3a already detects it |
+| `takes` heard as `text` | Devanagari `े` cannot write /eɪ/ | §4d — a script limit, not a drafting error |
+| `feet` for `fit` | all arms and `floor (him)` alike | the ruler, not the model |
+
+Only the first is a model defect and it has a mitigation that needs no new machinery: the detector
+that flags it already works, s1 was clean where s0 and s2 were not, and §4d's per-segment seed
+selection picks the clean one. That is CER-rankable, so it is buildable today.
 
 ## 5. What an English reference changes inside IndicF5
 
@@ -820,6 +864,8 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | The accent overshoot needed an accent experiment before anything else | The arm built to test accent answered an intelligibility question instead, and reached the Whisper floor. Accent is still unmeasured (§4d). |
 | The dentalising dials would cost content — written down before the run, so it would be honest | Wrong in sign, not just size. Both dials **beat** the baseline on every content number and produced a Russian-sounding accent. Whisper finds evenly-dentalised English easier to parse than Indian-accented English, so a better CER is what a worse accent looks like (§4e). |
 | Spelling is the lever that sets the accent level | It moves the accent a long way and not toward his. Dental plus initial aspiration is approximately the Slavic profile; accent is not a slider from retroflex to Indian English (§4e). |
+| The accent metric is the blocking piece of work | It is blocking an *accent* claim, and accent was then demoted to "80% is fine". What actually blocks both shipping and the generalisation test is the automatic transliterator, because `deva_ref` needs a Devanagari reference transcript that exists for one speaker and was made by hand (§4f). |
+| Phase 0 measured whether the route works | It measured whether the route works **for this speaker, on seven scripted sentences, from one 10 s studio reference**. Nothing in it has been run on a second voice (§4f). |
 | `deva_ref`/s2 sounded closest to him, so accent varies by seed and cannot be selected on CER | Misread. His s2 remark was about content, and going through the clips he reported the accent the same across all three seeds. He picked s1, which is also the lowest-CER seed — the detectors rank content correctly, which is their job (§4e). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
