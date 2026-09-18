@@ -287,3 +287,45 @@ def test_rescore_clears_scoring_state_from_a_previous_attempt(clips, monkeypatch
     row = next(r for r in seen["rows"] if r["arm"] == "latin")
     assert "ValueError" not in (row.get("heard") or "")
     assert row["cer"] == pytest.approx(0.0, abs=0.05)
+
+
+def test_rescore_picks_up_arms_a_scoped_run_left_out_of_the_cache(clips, monkeypatch):
+    """
+    main(only=...) writes rows.json for the arms it generated. An earlier arm's
+    clips stay on disk with no entry in that file, and reading the cache alone
+    would drop them from the report — an hour of GPU already spent, the audio
+    right there, and the table simply not mentioning it.
+
+    This is the same failure shape as the bug rescore() exists to repair: a
+    complete, plausible report that is missing something, with nothing saying
+    so.
+    """
+    import sys
+    import types
+
+    out = clips(["deva_hand/s0", "deva_ref/s0"], indexes=(6,), seconds=5.0)
+    # Only the new arm is cached, exactly as a scoped main() would leave it.
+    probe.save_rows([{"arm": "deva_ref", "seed": 0, "label": "deva_ref/s0",
+                      "index": 6, "language": "en", "slot_s": 3.68,
+                      "text": "Seven were impossible, and we had to rewrite them.",
+                      "in_reference": False}])
+
+    seen = {}
+
+    def fake_pipeline(*args, **kwargs):
+        def run(path, **rest):
+            return {"text": "seven were impossible and we had to rewrite them"}
+        return run
+
+    fake = types.ModuleType("transformers")
+    fake.pipeline = fake_pipeline
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    monkeypatch.setattr(probe, "report_rows", lambda rows: seen.setdefault("rows", rows))
+
+    probe.rescore()
+
+    arms = {r["arm"] for r in seen["rows"]}
+    assert "deva_ref" in arms, "the cached arm"
+    assert "deva_hand" in arms, "the arm left on disk by a scoped run"
+    # and it is not double-counted
+    assert len([r for r in seen["rows"] if r["arm"] == "deva_ref"]) == 1

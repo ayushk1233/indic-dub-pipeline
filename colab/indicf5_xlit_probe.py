@@ -476,12 +476,25 @@ def rescore():
         print(f"!! no clips under {OUT} — nothing to rescore. Run main().")
         return []
 
+    rows = []
     if ROWS.exists():
         saved = json.loads(ROWS.read_text(encoding="utf-8"))
         rows = [dict(row, path=OUT / row["label"].replace("/", "_")
                      / f"{row['index']:02d}.wav") for row in saved]
-    else:
-        rows = _rebuild_rows()
+
+    # main(only=...) writes rows.json for the arms it generated, so a scoped
+    # run leaves earlier arms on disk with no entry in the cache. Reading only
+    # the cache would drop them from the table without saying so — the clips
+    # are there, an hour of GPU already paid for, and the report would simply
+    # not mention them. Anything on disk the cache does not cover is rebuilt.
+    covered = {(row["label"], row["index"]) for row in rows}
+    orphans = [row for row in _rebuild_rows()
+               if (row["label"], row["index"]) not in covered]
+    if orphans:
+        labels = sorted({row["label"] for row in orphans})
+        print(f"  picked up {len(orphans)} clip(s) not in rows.json: "
+              f"{', '.join(labels)}")
+    rows += orphans
 
     # rows.json is a cache; the fixtures are the truth. A row missing the
     # intended text is not scored and not reported as unscored — it is simply
