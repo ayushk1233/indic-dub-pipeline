@@ -159,3 +159,59 @@ def main():
         print("separate the arms and this was not the discriminating test.")
 
     return results
+
+
+def check_arms(arms=("deva_hand",)):
+    """
+    The same question asked of the text the probe *generates*, not conditions on.
+
+    main() above covers the two reference transcripts, which is what the
+    spillover investigation needed. The transliteration probe hands the model
+    new text in a script no fixture has exercised, and a gap there fails in a
+    quieter way than spillover does: an unknown token maps to index 0, index 0
+    is the space, and a space is spoken as a pause. No exception, no warning,
+    no missing audio — just a word that comes out wrong. In a report that is
+    indistinguishable from IndicF5 being unable to say the word at all, which
+    is the one thing the probe exists to measure.
+
+    The hyphen in फोर्टी-सेवन and थर्टी-वन is the specific character to watch:
+    no Devanagari line in any existing fixture contains one, so nothing
+    measured so far says whether it is in vocab. If it is not, it degrades to
+    the spaced form, which is benign — but that is worth knowing rather than
+    assuming.
+
+    Run before synthesis. Two seconds, no GPU.
+
+        import colab.vocab_check as vc
+        vc.check_arms()
+    """
+    vocab = set(read_vocab(find_vocab()))
+
+    sentences = json.loads(
+        (FIXTURES / "sentences" / "fixture7.json").read_text(encoding="utf-8"))
+    english = {s["id"]: s["text"] for s in sentences["sentences"]}
+
+    texts = [(f"latin[{i}]", english[i]) for i in sorted(english)]
+    for arm in arms:
+        data = json.loads((FIXTURES / "xlit" / f"{arm}.json")
+                          .read_text(encoding="utf-8"))
+        texts += [(f"{arm}[{s['id']}]", s["devanagari"])
+                  for s in data["sentences"]]
+
+    gaps = {}
+    for label, text in texts:
+        missing, _ = report(label, text, vocab)
+        if missing:
+            gaps[label] = missing
+
+    print("\n" + "=" * 70)
+    if not gaps:
+        print("Every arm tokenizes fully. Whatever the probe hears is the")
+        print("model's handling of the text, not a vocabulary gap.")
+    else:
+        print("MISSING TOKENS — do not synthesize these rows yet:")
+        for label, missing in gaps.items():
+            print(f"    {label:<16} {missing} token(s) map to index 0, the space")
+        print("A row listed here cannot be scored for content: the pause it")
+        print("produces looks exactly like the model failing at the word.")
+    return gaps

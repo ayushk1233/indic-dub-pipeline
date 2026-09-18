@@ -40,6 +40,14 @@ artifacts/
 # and 8 MB of derived audio is worth carrying to avoid re-uploading 200 MB of
 # video into every fresh runtime. The .mov sources stay ignored.
 !fixtures/*.wav
+
+# The per-sentence slices, for the same reason and on the same budget — 1.9 MB.
+# This needs its own line because the pattern above does not reach into a
+# subdirectory. They are his real English, so they are the Whisper content
+# floor, the same-language identity ceiling, and what every generated clip is
+# listened to against; a GPU session without them can report numbers but
+# cannot calibrate them.
+!fixtures/en_speaker/*.wav
 *.mp3
 *.flac
 *.aac

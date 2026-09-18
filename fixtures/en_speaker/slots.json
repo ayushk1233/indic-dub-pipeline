@@ -1,0 +1,113 @@
+{
+  "_note": "One clip per fixture7 sentence, cut from fixtures/english_speech.wav on Whisper word timestamps by scripts/slice_english_sentences.py. duration_s is this speaker's own slot for that sentence and is what fix_duration is set from; the wav files are the same-language identity ceiling and the Whisper content floor. `heard` is what the ASR made of the span and `match` how well that agrees with the scripted text — he did not read the script word for word, so neither is 1.00 and both are recorded rather than assumed. `in_reference` marks sentences that fall inside the 10s reference clip the probe conditions on: the model is handed that audio and its transcript, so an arm that succeeds only on those has not been shown to generalise. measured_cps is the rate inside slots, with the pauses between sentences excluded, which is the rate fix_duration needs and runs higher than a whole-take figure.",
+  "source": "fixtures/english_speech.wav",
+  "source_duration_s": 50.096,
+  "language": "en",
+  "pad_s": 0.06,
+  "reference_window_s": [
+    0.0,
+    10.0
+  ],
+  "covered_s": 37.94,
+  "measured_cps": 15.79,
+  "slots": [
+    {
+      "id": 0,
+      "file": "00.wav",
+      "text": "Let me tell you what this project actually does.",
+      "heard": "let me tell you what this project actually does.",
+      "match": 1.0,
+      "start_s": 0.52,
+      "end_s": 3.06,
+      "duration_s": 2.54,
+      "chars": 48,
+      "cps": 18.9,
+      "reference_overlap_s": 2.54,
+      "in_reference": true
+    },
+    {
+      "id": 1,
+      "file": "01.wav",
+      "text": "You give it a video — a lecture, an interview, anything with clear speech — and it gives you back the same video speaking Hindi.",
+      "heard": "You get a video, lecture and interview anything with clear speech and it gives you back the same video speaking in Hindi.",
+      "match": 0.964,
+      "start_s": 3.22,
+      "end_s": 12.84,
+      "duration_s": 9.62,
+      "chars": 128,
+      "cps": 13.31,
+      "reference_overlap_s": 6.78,
+      "in_reference": true
+    },
+    {
+      "id": 2,
+      "file": "02.wav",
+      "text": "Hindi takes about twenty percent longer to say than the English it replaces, and the words still have to land in the same three seconds.",
+      "heard": "Hindi takes about 20 % longer to say than the English it replaces and the words still have to land in the same 3 seconds.",
+      "match": 1.0,
+      "start_s": 15.06,
+      "end_s": 24.2,
+      "duration_s": 9.14,
+      "chars": 136,
+      "cps": 14.88,
+      "reference_overlap_s": 0.0,
+      "in_reference": false
+    },
+    {
+      "id": 3,
+      "file": "03.wav",
+      "text": "We generate six different translations for every sentence, measure how long each one would take to speak, and keep the one that fits without losing the meaning.",
+      "heard": "We generate 6 different translations for every sentence, measure how long each one would take to speak and keep that one that fits without losing the meaning.",
+      "match": 0.989,
+      "start_s": 25.86,
+      "end_s": 34.1,
+      "duration_s": 8.24,
+      "chars": 160,
+      "cps": 19.42,
+      "reference_overlap_s": 0.0,
+      "in_reference": false
+    },
+    {
+      "id": 4,
+      "file": "04.wav",
+      "text": "Last week the system processed forty-seven segments.",
+      "heard": "Last week the system processed 47 segments,",
+      "match": 1.0,
+      "start_s": 34.62,
+      "end_s": 37.48,
+      "duration_s": 2.86,
+      "chars": 52,
+      "cps": 18.18,
+      "reference_overlap_s": 0.0,
+      "in_reference": false
+    },
+    {
+      "id": 5,
+      "file": "05.wav",
+      "text": "Thirty-one fit perfectly.",
+      "heard": "31 fit perfectly,",
+      "match": 1.0,
+      "start_s": 37.64,
+      "end_s": 39.5,
+      "duration_s": 1.86,
+      "chars": 25,
+      "cps": 13.44,
+      "reference_overlap_s": 0.0,
+      "in_reference": false
+    },
+    {
+      "id": 6,
+      "file": "06.wav",
+      "text": "Seven were impossible, and we had to rewrite them.",
+      "heard": "7 were impossible and we had to rewrite them",
+      "match": 1.0,
+      "start_s": 40.88,
+      "end_s": 44.56,
+      "duration_s": 3.68,
+      "chars": 50,
+      "cps": 13.59,
+      "reference_overlap_s": 0.0,
+      "in_reference": false
+    }
+  ]
+}

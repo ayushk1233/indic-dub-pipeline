@@ -1,0 +1,518 @@
+"""
+Phase 0: can IndicF5 speak intelligible Indian English out of Devanagari?
+
+FINDINGS §4 settled that IndicF5 cannot generate English from Latin text — not
+accented English, not English at all. "Seven were impossible, and we had to
+rewrite them." came back as `Sraindari ansu alwe atcho rureshi chong.` The
+vocabulary was ruled out as the explanation: Latin is the largest script in its
+2545-token vocabulary and the English transcript tokenizes at 100%.
+
+The hypothesis here is that the model is fluent in Devanagari and that Hindi
+speech is full of English loanwords spoken with Indian phonology, so English
+*spelled* in Devanagari should come out as intelligible, Indian-accented
+English through the same cloning path that already scores 93% for `en -> hi`.
+
+This is a kill shot, not the experiment. Two arms, 28 clips, one session, no
+new modules and no new dependencies. If `deva_hand` — a human writing English
+in Devanagari as he would say it, the upper bound for every automatic arm — is
+not intelligible, then no transliterator is, and TRANSLITERATION_PLAN's phases
+1 to 5 and FINETUNE_PLAN's Route A are all answered at once, for an hour of GPU
+instead of a week of building.
+
+Three things are deliberate:
+
+  - **Three seeds on the hypothesis arm, here rather than at the end.**
+    FINDINGS §14 records "the seven-configuration conditioning sweep found
+    something" as a claim that turned out wrong, because the sweep's entire
+    span was smaller than the scale's own noise. Every arm comparison in the
+    later phases is unreadable until the seed-to-seed spread is known, so it is
+    measured first, on the arm that matters, for fourteen extra clips.
+
+  - **The `latin` control is regenerated rather than cited.** It is known to
+    fail. Running it proves the content check still fires in *this* session; if
+    it comes back clean, the harness is wrong and nothing else in the report
+    means anything.
+
+  - **Sentences 0 and 1 sit inside the reference clip.** fixtures/en_speaker
+    records which, because the model is handed that audio and its transcript,
+    and an arm that works only on those has not been shown to generalise.
+
+    import colab.indicf5_xlit_probe as probe
+    rows = probe.main()
+    probe.listen(rows)
+"""
+
+import json
+import time
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+import torch
+
+from colab import workspace
+from colab.indicf5_check import (
+    FIXTURES,
+    MAX_CER,
+    MAX_EXTRA,
+    MAX_MISSING,
+    as_float_wave,
+    load_indicf5,
+    score_text,
+    transcribe_outputs,
+)
+from colab.indicf5_diagnose import FRAME_RATE, install_patches, _calls, _mode
+from colab.indicf5_english import MAX_LEAD, NATURAL_CPS_EN, devanagari_fraction, plain
+from src.eval.translation_metrics import script_ratio
+
+OUT = workspace.out("indicf5_xlit_probe")
+REPORT = workspace.report("indicf5_xlit_probe.txt")
+
+SAMPLE_RATE = 24000
+REFERENCE = "english_reference_short.wav"
+REFERENCE_KEY = "english_short"
+
+SENTENCES = FIXTURES / "sentences" / "fixture7.json"
+SLOTS = FIXTURES / "en_speaker" / "slots.json"
+XLIT = FIXTURES / "xlit"
+
+# One seed for the control, three for the hypothesis. The control's job is to
+# fail; measuring how consistently it fails is not worth 14 clips.
+CONTROL_SEEDS = (0,)
+HYPOTHESIS_SEEDS = (0, 1, 2)
+
+# Indian-accented English may come back transcribed in Devanagari — Whisper's
+# `language` is a hint, not a constraint (FINDINGS §13). A transcript in the
+# wrong script scores as all errors, which would read as the model failing when
+# the ruler is what moved. Gate on script before reading any error rate.
+MIN_LATIN_FRACTION = 0.9
+
+# The generated span must match the slot to within a mel frame. Wider than that
+# and fix_duration did not take effect, whatever the report says.
+ONE_HOP_S = 1.0 / FRAME_RATE
+SPAN_TOLERANCE_S = 2 * ONE_HOP_S
+
+_lines = []
+
+
+def p(text=""):
+    print(text)
+    _lines.append(text)
+
+
+def section(title):
+    p("")
+    p("=" * 76)
+    p(title)
+    p("=" * 76)
+
+
+def mean(rows, key):
+    values = [r.get(key, np.nan) for r in rows]
+    values = [v for v in values if v is not None and np.isfinite(v)]
+    return float(np.mean(values)) if values else float("nan")
+
+
+def load_arm(name):
+    """
+    One arm's generated text, per sentence id.
+
+    An unreviewed hand transliteration is refused rather than run. The whole
+    value of this arm is that it is a human upper bound; scoring a draft and
+    reporting it as `deva_hand` would answer a different question than the one
+    the report claims to answer.
+    """
+    path = XLIT / f"{name}.json"
+    if not path.exists():
+        return None, f"{path} does not exist"
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    if not data.get("reviewed"):
+        unreviewed = [s["id"] for s in data["sentences"] if not s.get("reviewed")]
+        return None, (
+            f"{path.name} is not reviewed (sentences {unreviewed}). A native "
+            "speaker has to correct the draft and set reviewed=true before it "
+            "can be called a gold standard."
+        )
+
+    return {s["id"]: s["devanagari"] for s in data["sentences"]}, None
+
+
+def check_text(text):
+    """Refuse text the model would silently mispronounce or swallow."""
+    problems = []
+    fraction = devanagari_fraction(text)
+    if fraction < 0.95:
+        problems.append(f"only {fraction:.0%} Devanagari — a word came back in Latin")
+    return problems
+
+
+def main():
+    _lines.clear()
+
+    for path in (SENTENCES, SLOTS):
+        if not path.exists():
+            p(f"!! missing {path}")
+            p("   Run scripts.slice_english_sentences locally, commit, then pull.")
+            return []
+
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    frozen = json.loads(SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    slot_data = json.loads(SLOTS.read_text(encoding="utf-8"))
+    slots = {s["id"]: s for s in slot_data["slots"]}
+    transcripts = json.loads((FIXTURES / "reference_text.json").read_text(encoding="utf-8"))
+
+    reference_path = FIXTURES / REFERENCE
+    reference_seconds = sf.info(str(reference_path)).duration
+
+    # Punctuation stripped and lowercased — FINDINGS §5c, the shipping policy.
+    # The one clip in seven that still opened with invented speech stopped
+    # doing so when this was applied, and it costs nothing.
+    reference_text = plain(transcripts[REFERENCE_KEY]["text"])
+
+    english = {e["id"]: e["text"] for e in frozen}
+    hand, refusal = load_arm("deva_hand")
+
+    section("SETUP")
+    p(f"  reference   {REFERENCE}  {reference_seconds:.2f}s")
+    p(f"              {len(reference_text)} chars, "
+      f"{len(reference_text.encode('utf-8'))} bytes, punctuation stripped")
+    p(f"              {reference_text}")
+    p("")
+    p(f"  sentences   {len(frozen)} from {SENTENCES.name}")
+    p(f"  slots       his own, sliced from english_speech.wav; "
+      f"{slot_data['measured_cps']:.1f} cps against {NATURAL_CPS_EN} on FLEURS")
+
+    inside = [i for i, s in slots.items() if s.get("in_reference")]
+    if inside:
+        p(f"  !! sentences {inside} fall inside the reference clip. The model is")
+        p("     handed that audio and its transcript, so read those rows apart")
+        p("     from the rest — an arm that works only there has shown nothing.")
+
+    arms = [("latin", english, CONTROL_SEEDS)]
+    if hand is None:
+        p("")
+        p(f"  !! deva_hand not run: {refusal}")
+        p("     Without it there is no upper bound and this run cannot answer")
+        p("     the question it was written for.")
+    else:
+        arms.append(("deva_hand", hand, HYPOTHESIS_SEEDS))
+
+    section("TEXT GATES — before any synthesis")
+    p(f"{'arm':<12}{'id':>3}{'chars':>7}{'bytes':>7}{'deva':>7}{'slot':>7}"
+      f"{'asked cps':>11}")
+    p("")
+    blocked = False
+    for arm, texts, _ in arms:
+        for entry in frozen:
+            text = texts[entry["id"]]
+            slot = slots[entry["id"]]["duration_s"]
+            problems = check_text(text) if arm != "latin" else []
+            p(f"{arm:<12}{entry['id']:>3}{len(text):>7}"
+              f"{len(text.encode('utf-8')):>7}"
+              f"{devanagari_fraction(text):>6.0%}{slot:>6.2f}s"
+              f"{len(text) / slot:>11.1f}"
+              + ("   <-- " + "; ".join(problems) if problems else ""))
+            blocked = blocked or bool(problems)
+
+    p("")
+    p("  Bytes against characters is the check that matters. Devanagari costs")
+    p("  about 2.6 bytes a character and Latin one, which is the whole reason")
+    p("  the byte-ratio duration formula cannot be trusted across scripts and")
+    p("  fix_duration is used instead.")
+
+    if blocked:
+        p("")
+        p("!! a text gate failed. Fix the transliteration before spending GPU.")
+        return []
+
+    install_patches()
+    model = load_indicf5()
+
+    rows = []
+    for arm, texts, seeds in arms:
+        for seed in seeds:
+            label = arm if len(seeds) == 1 else f"{arm}/s{seed}"
+            p(f"\n--- {label}")
+
+            for entry in frozen:
+                sentence_id = entry["id"]
+                text = texts[sentence_id]
+                slot = slots[sentence_id]["duration_s"]
+
+                # A total, reference included. Injected through the patch rather
+                # than passed to the model, because IndicF5's remote __call__
+                # decides what it forwards and a dropped keyword reverts to the
+                # byte formula without raising.
+                _mode["speed"] = None
+                _mode["one_chunk"] = True
+                _mode["fix_duration"] = reference_seconds + slot
+                _calls.clear()
+
+                torch.manual_seed(seed)
+                started = time.perf_counter()
+                try:
+                    audio = model(text, ref_audio_path=str(reference_path),
+                                  ref_text=reference_text)
+                except Exception as exc:
+                    p(f"    [{sentence_id}] FAILED {type(exc).__name__}: {exc}")
+                    continue
+
+                wave = as_float_wave(audio)
+                path = OUT / label.replace("/", "_") / f"{sentence_id:02d}.wav"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                sf.write(str(path), wave, SAMPLE_RATE, subtype="PCM_16")
+
+                call = dict(_calls[-1]) if _calls else {}
+                duration = len(wave) / SAMPLE_RATE
+                rows.append({
+                    "arm": arm, "seed": seed, "label": label,
+                    "index": sentence_id,
+                    # Scored against the English, never the Devanagari fed to
+                    # the model: the question is whether a listener hears the
+                    # sentence, not whether the model read the spelling back.
+                    "text": english[sentence_id],
+                    "given": text,
+                    "path": path, "language": "en",
+                    "actual_s": duration,
+                    "slot_s": slot,
+                    "natural_s": len(english[sentence_id]) / NATURAL_CPS_EN,
+                    "requested_s": call.get("requested_s", float("nan")),
+                    "in_reference": slots[sentence_id].get("in_reference", False),
+                    "instrumented": bool(_calls),
+                    "wall_s": time.perf_counter() - started,
+                })
+                p(f"    [{sentence_id}] {duration:5.2f}s  slot {slot:5.2f}s  "
+                  f"asked {rows[-1]['requested_s']:5.2f}s  "
+                  f"{duration / slot:.2f}x slot")
+
+    if not rows:
+        p("\n!! nothing generated")
+        return rows
+
+    if not any(r["instrumented"] for r in rows):
+        section("INSTRUMENTATION FAILED")
+        p("  The patched infer_batch_process was never called, so IndicF5 does")
+        p("  not reach generation through f5_tts.infer.utils_infer on this")
+        p("  install. fix_duration was therefore never applied and every")
+        p("  duration below came from the byte formula. Nothing here is a")
+        p("  measurement. Find the real call path before reading on.")
+        return rows
+
+    section("DID fix_duration TAKE EFFECT?")
+    p("  The generated span against the slot it was asked for. A parameter that")
+    p("  silently does nothing is this repo's known failure mode, so it is")
+    p("  checked rather than assumed.")
+    p("")
+    off = [r for r in rows
+           if not np.isfinite(r["requested_s"])
+           or abs(r["requested_s"] - r["slot_s"]) > SPAN_TOLERANCE_S]
+    if off:
+        p(f"  !! {len(off)} of {len(rows)} clips were not asked for their slot.")
+        for row in off[:5]:
+            p(f"     {row['label']} [{row['index']}] asked "
+              f"{row['requested_s']:.2f}s for a {row['slot_s']:.2f}s slot")
+        p("     Every duration and pace number below describes something else.")
+    else:
+        p(f"  All {len(rows)} clips asked for their own slot, within "
+          f"{SPAN_TOLERANCE_S * 1000:.0f} ms.")
+
+    del model
+    torch.cuda.empty_cache()
+    transcribe_outputs(rows)
+
+    # ------------------------------------------------------------ script gate
+    section("SCRIPT — is the transcript even in the right alphabet?")
+    p("  Whisper's language argument is a hint. Indian-accented English coming")
+    p("  back in Devanagari would score as every character wrong, which reads")
+    p("  as the model failing when it is the ruler that moved.")
+    p("")
+    for row in rows:
+        heard = row.get("heard") or ""
+        row["latin"] = script_ratio(heard, "en") if heard else 0.0
+        row["wrong_script"] = bool(heard) and row["latin"] < MIN_LATIN_FRACTION
+        if row["wrong_script"]:
+            row.update({"cer": float("nan"), "extra": float("nan"),
+                        "missing": float("nan"), "lead": float("nan")})
+
+    drifted = [r for r in rows if r.get("wrong_script")]
+    p(f"  {len(drifted)} of {len(rows)} transcripts came back under "
+      f"{MIN_LATIN_FRACTION:.0%} Latin and are not scored for content.")
+    for row in drifted[:5]:
+        p(f"    {row['label']} [{row['index']}] {row['latin']:.0%} Latin: "
+          f"{(row.get('heard') or '')[:60]!r}")
+
+    # --------------------------------------------------------------- content
+    section("CONTENT — the gate, before anything else is reported")
+    p(f"{'arm':<14}{'n':>3}{'cer':>8}{'extra':>8}{'missing':>9}{'lead':>7}"
+      f"{'got/slot':>10}{'bad':>6}")
+    p("")
+
+    table = {}
+    for label in dict.fromkeys(r["label"] for r in rows):
+        items = [r for r in rows if r["label"] == label]
+        scored = [r for r in items if np.isfinite(r.get("cer", np.nan))]
+        bad = [r for r in items
+               if r.get("wrong_script")
+               or r.get("asr_looped")
+               or r.get("extra", 0) > MAX_EXTRA
+               or r.get("missing", 0) > MAX_MISSING
+               or r.get("cer", 0) > MAX_CER
+               or r.get("lead", 0) > MAX_LEAD]
+        table[label] = {
+            "cer": mean(scored, "cer"), "extra": mean(scored, "extra"),
+            "missing": mean(scored, "missing"), "lead": mean(scored, "lead"),
+            "got": float(np.mean([r["actual_s"] / r["slot_s"] for r in items])),
+            "bad": len(bad), "n": len(items),
+        }
+        p(f"{label:<14}{len(items):>3}{table[label]['cer']:>8.3f}"
+          f"{table[label]['extra']:>8.3f}{table[label]['missing']:>9.3f}"
+          f"{table[label]['lead']:>7.3f}{table[label]['got']:>10.2f}"
+          f"{len(bad):>5}/{len(items)}")
+
+    p("")
+    p("  There is no Whisper floor in this table yet. Transcribe")
+    p("  fixtures/en_speaker/*.wav — his real English — and read the CER column")
+    p("  against that, not against zero. FINDINGS §12 already put word error at")
+    p("  7.9% on this recording, so the floor is not small.")
+
+    section("BY SENTENCE — and whether it was inside the reference")
+    p(f"{'arm':<14}{'id':>3}{'ref':>5}{'cer':>8}{'extra':>8}{'lead':>7}"
+      f"{'got/slot':>10}")
+    p("")
+    for row in rows:
+        p(f"{row['label']:<14}{row['index']:>3}"
+          f"{'  in' if row['in_reference'] else '   -':>5}"
+          f"{row.get('cer', float('nan')):>8.3f}"
+          f"{row.get('extra', float('nan')):>8.3f}"
+          f"{row.get('lead', float('nan')):>7.3f}"
+          f"{row['actual_s'] / row['slot_s']:>10.2f}")
+
+    # ------------------------------------------------------------ seed spread
+    section("SEED SPREAD — the noise floor every later comparison needs")
+    hypothesis = [r for r in rows if r["arm"] == "deva_hand"]
+    spread = float("nan")
+    if len({r["seed"] for r in hypothesis}) > 1:
+        per_seed = {}
+        for seed in sorted({r["seed"] for r in hypothesis}):
+            items = [r for r in hypothesis if r["seed"] == seed]
+            per_seed[seed] = mean(items, "cer")
+            p(f"  seed {seed}   cer {per_seed[seed]:.3f}   "
+              f"{sum(1 for r in items if r.get('cer', 0) > MAX_CER)} over threshold")
+        values = [v for v in per_seed.values() if np.isfinite(v)]
+        spread = max(values) - min(values) if len(values) > 1 else float("nan")
+        p("")
+        p(f"  spread {spread:.3f} in mean cer across seeds.")
+        p("")
+        p("  This is the number that makes phases 1 to 4 readable. FINDINGS §14")
+        p("  records a seven-configuration sweep whose entire span was 0.046")
+        p("  against a scale spanning 0.87 — meaningless, and it was written")
+        p("  down as a finding first. Any arm difference smaller than this")
+        p("  spread is not a difference.")
+    else:
+        p("  Only one seed ran; the later phases have no noise floor to read")
+        p("  their differences against.")
+
+    # ---------------------------------------------------------------- verdict
+    section("VERDICT")
+    control = table.get("latin")
+    if control is None:
+        p("  The control did not run, so the content check is unverified in")
+        p("  this session and nothing below should be believed.")
+    elif control["bad"] == 0:
+        p("  !! The `latin` control came back CLEAN. FINDINGS §4 measured this")
+        p("     configuration producing speech that is not English at all, so a")
+        p("     clean result means the harness is broken, not that the model")
+        p("     improved. Stop and fix the content check.")
+    else:
+        p(f"  Control behaves: latin {control['bad']}/{control['n']} clips bad,")
+        p(f"  cer {control['cer']:.3f}. The content check fires in this session.")
+
+    p("")
+    hand_rows = [table[l] for l in table if l.startswith("deva_hand")]
+    if not hand_rows:
+        p("  deva_hand did not run. This session answered nothing.")
+    else:
+        worst = max(r["bad"] for r in hand_rows)
+        best = min(r["bad"] for r in hand_rows)
+        cer = float(np.mean([r["cer"] for r in hand_rows
+                             if np.isfinite(r["cer"])] or [np.nan]))
+        p(f"  deva_hand  {best}-{worst} bad clips of {hand_rows[0]['n']} "
+          f"per seed, mean cer {cer:.3f}")
+        p("")
+        p("  The gate is the continue-the-probe one, not the ship one: content")
+        p("  clean, pace near 1.0, and the arm gap bigger than the seed spread.")
+        p("  Accent is not asserted here — nothing in this run measures it.")
+        p("")
+        p("  0 bad clips, cer near the Whisper floor  -> the hypothesis holds.")
+        p("        Build src/text/normalize.py and en_to_deva.py and run the")
+        p("        automatic arms against this upper bound.")
+        p("  intelligible but not Indian by ear       -> the accent metric is")
+        p("        now worth building; §3c before any more arms.")
+        p("  not intelligible                         -> stop. FINETUNE_PLAN")
+        p("        Route B, and none of the metric machinery gets written.")
+        p("")
+        p("  Whatever the table says, listen to all of them before deciding.")
+        p("  Two of this project's findings were caught by ear and by no")
+        p("  metric, and Whisper is a fluency prior that can round-trip")
+        p("  garbled audio clean (FINDINGS §3b).")
+
+    REPORT.write_text("\n".join(_lines) + "\n", encoding="utf-8")
+    print(f"\nwrote {REPORT}")
+    return rows
+
+
+def listen(rows, arms=None, indexes=None):
+    """
+    His real reading first, then each arm on the same sentence.
+
+    The real clip is the point: this arm is trying to sound like him speaking
+    English, and no number in the report reads accent.
+    """
+    from IPython.display import Audio, display
+
+    picked = [r for r in rows
+              if (arms is None or r["arm"] in arms)
+              and (indexes is None or r["index"] in indexes)]
+
+    for index in sorted({r["index"] for r in picked}):
+        group = [r for r in picked if r["index"] == index]
+        print(f"\n{'=' * 70}\n[{index}] {group[0]['text']}")
+        print(f"     given: {group[0]['given']}")
+        if group[0]["in_reference"]:
+            print("     (inside the reference clip — the model was handed this)")
+        print("=" * 70)
+
+        real = FIXTURES / "en_speaker" / f"{index:02d}.wav"
+        if real.exists():
+            print(f"\nhim, really saying it   {sf.info(str(real)).duration:.2f}s")
+            display(Audio(str(real)))
+
+        for row in sorted(group, key=lambda r: (r["arm"], r["seed"])):
+            notes = []
+            if row.get("wrong_script"):
+                notes.append(f"WRONG SCRIPT ({row.get('latin', 0):.0%} Latin)")
+            if row.get("asr_looped"):
+                notes.append("UNREADABLE (ASR looped)")
+            if row.get("lead", 0) > MAX_LEAD:
+                notes.append("PREFIX")
+            if row.get("extra", 0) > MAX_EXTRA:
+                notes.append("GIBBERISH")
+            if row.get("missing", 0) > MAX_MISSING:
+                notes.append("CUT SHORT")
+            if row.get("cer", 0) > MAX_CER:
+                notes.append("MANGLED")
+
+            print(f"\n{row['label']}   {row['actual_s']:.2f}s  "
+                  f"{row['actual_s'] / row['slot_s']:.2f}x slot"
+                  + ("   " + "  ".join(notes) if notes else ""))
+            heard = row.get("heard") or ""
+            if heard:
+                print(f"  heard: {heard[:200]}")
+            display(Audio(str(row["path"])))
+
+
+if __name__ == "__main__":
+    main()

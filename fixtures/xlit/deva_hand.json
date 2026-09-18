@@ -1,0 +1,96 @@
+{
+  "_note": "Hand transliteration of fixture7 into Devanagari — the gold-standard arm and the upper bound for the whole approach. Drafted by Claude and REVIEWED by the speaker on 2026-09-18: the phonetics were accepted as drafted, including the voiced sibilants (डज़, गिव्ज़, रिप्लेसेज़, मेज़र, लूज़िंग), and the only correction was to mirror the English hyphen in the number compounds — फोर्टी-सेवन and थर्टी-वन, previously spaced. The hyphen is the one character here that no existing fixture exercises: no Devanagari line in scripted_text.json or reference_text.json contains one, so the en->hi run that synthesized clean says nothing about it. If it is out of IndicF5's vocab it maps to index 0, which is a space, giving back exactly the spaced form it replaced — a safe failure, but confirm it with colab/vocab_check.py rather than assume it. Text is NFC-normalised, so nukta letters are stored decomposed (ज़ as ज + U+093C) — U+0958..U+095F are Unicode composition exclusions, so NFC pulls the precomposed forms apart rather than building them, and precomposed_nukta is empty on every row. devanagari_fraction counts only isalpha() characters, so the hyphen and the danda do not dilute it. Punctuation otherwise follows the Hindi gen-text convention in fixtures/scripted_text.json: commas and em dashes kept, sentence-final danda. That is a choice, not a finding — gen-text punctuation is its own variable (TRANSLITERATION_PLAN §4, phase 4). Where an English word already has a conventional Hindi spelling it is used verbatim rather than spelled afresh, because that is the form IndicF5's Hindi training text contains; the eight taken straight from the Hindi fixture are listed in from_hindi_fixture. Vocabulary coverage against IndicF5's vocab.txt has NOT been checked — run colab/vocab_check.py before synthesis, because an out-of-vocabulary character maps to index 0, which is a space, and is spoken as a pause rather than raising.",
+  "arm": "deva_hand",
+  "source": "fixtures/sentences/fixture7.json",
+  "normalization": "NFC",
+  "from_hindi_fixture": [
+    "प्रोजेक्ट",
+    "वीडियो",
+    "लेक्चर",
+    "इंटरव्यू",
+    "सिस्टम",
+    "सेगमेंट",
+    "प्रोसेस",
+    "फ़िट"
+  ],
+  "reviewed": true,
+  "sentences": [
+    {
+      "id": 0,
+      "english": "Let me tell you what this project actually does.",
+      "devanagari": "लेट मी टेल यू व्हाट दिस प्रोजेक्ट ऐक्चुअली डज़।",
+      "chars": 47,
+      "bytes": 125,
+      "combining_marks": 5,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 1,
+      "english": "You give it a video — a lecture, an interview, anything with clear speech — and it gives you back the same video speaking Hindi.",
+      "devanagari": "यू गिव इट अ वीडियो — अ लेक्चर, ऐन इंटरव्यू, एनीथिंग विद क्लियर स्पीच — एंड इट गिव्ज़ यू बैक द सेम वीडियो स्पीकिंग हिंदी।",
+      "chars": 120,
+      "bytes": 308,
+      "combining_marks": 7,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 2,
+      "english": "Hindi takes about twenty percent longer to say than the English it replaces, and the words still have to land in the same three seconds.",
+      "devanagari": "हिंदी टेक्स अबाउट ट्वेंटी परसेंट लॉन्गर टू से दैन द इंग्लिश इट रिप्लेसेज़, एंड द वर्ड्स स्टिल हैव टू लैंड इन द सेम थ्री सेकंड्स।",
+      "chars": 128,
+      "bytes": 334,
+      "combining_marks": 11,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 3,
+      "english": "We generate six different translations for every sentence, measure how long each one would take to speak, and keep the one that fits without losing the meaning.",
+      "devanagari": "वी जेनरेट सिक्स डिफरेंट ट्रांसलेशंस फॉर एवरी सेंटेंस, मेज़र हाउ लॉन्ग ईच वन वुड टेक टू स्पीक, एंड कीप द वन दैट फिट्स विदाउट लूज़िंग द मीनिंग।",
+      "chars": 141,
+      "bytes": 367,
+      "combining_marks": 7,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 4,
+      "english": "Last week the system processed forty-seven segments.",
+      "devanagari": "लास्ट वीक द सिस्टम प्रोसेस्ड फोर्टी-सेवन सेगमेंट्स।",
+      "chars": 51,
+      "bytes": 139,
+      "combining_marks": 6,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 5,
+      "english": "Thirty-one fit perfectly.",
+      "devanagari": "थर्टी-वन फिट परफेक्टली।",
+      "chars": 23,
+      "bytes": 63,
+      "combining_marks": 2,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    },
+    {
+      "id": 6,
+      "english": "Seven were impossible, and we had to rewrite them.",
+      "devanagari": "सेवन वर इम्पॉसिबल, एंड वी हैड टू रीराइट देम।",
+      "chars": 44,
+      "bytes": 114,
+      "combining_marks": 1,
+      "devanagari_fraction": 1.0,
+      "precomposed_nukta": [],
+      "reviewed": true
+    }
+  ]
+}

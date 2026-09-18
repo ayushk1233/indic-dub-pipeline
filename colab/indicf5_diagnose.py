@@ -94,7 +94,15 @@ ARMS = [
 
 _calls = []
 _pending = {}
-_mode = {"speed": None, "one_chunk": False}
+
+# fix_duration is injected here rather than passed to the model, for the same
+# reason speed is: IndicF5's remote __call__ decides which of infer_process's
+# arguments it forwards, and a keyword it drops on the floor fails silently —
+# the duration simply reverts to the byte formula and the run looks like a
+# model result. Setting it inside the wrapper puts it in the arguments that
+# infer_batch_process is actually called with, and _calls records what the
+# sampler was then given, so the two can be checked against each other.
+_mode = {"speed": None, "one_chunk": False, "fix_duration": None}
 
 _lines = []
 
@@ -153,6 +161,19 @@ def install_patches():
         allocated = ref_seconds / ref_bytes * gen_bytes if ref_bytes else float("nan")
         wanted = gen_chars / NATURAL_CPS_HI if gen_chars else float("nan")
 
+        # A total, reference included — FINETUNE_PLAN §0, read from
+        # utils_infer: `duration = int(fix_duration * sr / hop)`. It replaces
+        # the byte-ratio allocation rather than adjusting it, so speed stops
+        # mattering on any call that sets it.
+        if _mode["fix_duration"] is not None:
+            if "fix_duration" not in arguments:
+                raise TypeError(
+                    "infer_batch_process takes no fix_duration on this install; "
+                    "injecting it would do nothing and the byte formula would "
+                    "silently decide every duration instead"
+                )
+            arguments["fix_duration"] = float(_mode["fix_duration"])
+
         if _mode["speed"] == "auto":
             # Divide out exactly the over-allocation measured on this call.
             # Nothing here assumes a script or a bytes-per-character constant:
@@ -194,6 +215,7 @@ def install_patches():
             "gen_bytes": gen_bytes,
             "gen_chars": gen_chars,
             "speed": arguments.get("speed"),
+            "fix_duration": arguments.get("fix_duration"),
             "formula_s": allocated,
             "requested_s": requested,
             "natural_s": wanted,

@@ -65,6 +65,7 @@ from colab import speaker_scale
 from colab import workspace
 from colab.english_report import cosine
 from colab.indicf5_check import (
+    ASR_DECODE,
     ASR_MODEL,
     _PUNCT,
     FIXTURES,
@@ -174,7 +175,14 @@ def transliterate(text):
 
 
 def hear(path, language):
-    """One clip, one transcript. Whisper is loaded and dropped around it."""
+    """
+    One clip, one transcript. Whisper is loaded and dropped around it.
+
+    Pinned decoding, like transcribe_outputs. This transcript is not a score —
+    it is handed back to IndicF5 as the reference text, so a sampled decode
+    would change the model's conditioning between two runs that are supposed to
+    differ in one variable.
+    """
     from transformers import pipeline
 
     device = 0 if torch.cuda.is_available() else -1
@@ -182,7 +190,8 @@ def hear(path, language):
                    torch_dtype=torch.float16 if device == 0 else torch.float32)
     try:
         out = asr(str(path), generate_kwargs={"language": language,
-                                              "task": "transcribe"})
+                                              "task": "transcribe",
+                                              **ASR_DECODE})
         return (out or {}).get("text", "").strip()
     finally:
         del asr

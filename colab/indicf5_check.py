@@ -94,6 +94,21 @@ NATURAL_CPS_HI = 10.81
 # breaking each other. Whisper via transformers adds no new dependency at all.
 ASR_MODEL = "openai/whisper-large-v3-turbo"
 
+# Greedy, with no temperature-fallback ladder and nothing carried forward
+# between windows. Whisper's defaults retry at rising temperatures when a decode
+# trips the compression-ratio guard — and those retries sample, so two runs of
+# the same clip disagree and an arm difference is partly decode noise.
+# scripts/transcribe_fixtures.py pins these for exactly that reason; this path
+# did not, which made every arm comparison here noisier than it looked.
+# `do_sample=False` is redundant alongside temperature 0.0 and is left out
+# rather than stated twice.
+ASR_DECODE = {
+    "temperature": 0.0,
+    # The other half of what drives a repetition loop: once the model emits a
+    # repeated phrase it conditions on that repetition and continues it.
+    "condition_on_previous_text": False,
+}
+
 # What counts as broken rather than imperfect, as a fraction of the intended
 # length. A single error rate cannot do this job: gibberish appended to an
 # otherwise correct sentence scores about 0.31, which sits under any threshold
@@ -283,6 +298,10 @@ def transcribe_outputs(rows):
 
     Loaded after synthesis so it never competes with the two TTS models for
     GPU memory.
+
+    Decoding is pinned (ASR_DECODE) so a re-run of the same clips produces the
+    same transcripts. Without that, part of any measured difference between two
+    arms is Whisper sampling rather than the model — FINDINGS §13.
     """
     from transformers import pipeline
 
@@ -300,7 +319,8 @@ def transcribe_outputs(rows):
         try:
             out = asr(str(row["path"]),
                       generate_kwargs={"language": row.get("language", "hi"),
-                                       "task": "transcribe"})
+                                       "task": "transcribe",
+                                       **ASR_DECODE})
             row["heard"] = (out or {}).get("text", "").strip()
             row["asr_looped"] = transcript_impossible(row["heard"], row["path"])
             if row["asr_looped"]:
