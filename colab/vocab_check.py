@@ -71,8 +71,15 @@ def find_vocab(pattern=None):
             return Path(matches[-1])
 
     raise FileNotFoundError(
-        f"no vocab.txt under any of {patterns} — load the model once first, "
-        "or pass the path printed by load_indicf5 as `vocab :`")
+        f"no vocab.txt under any of {patterns} — nothing has downloaded "
+        "IndicF5 into this session's cache yet. The point of this check is to "
+        "run before anything expensive, so fetch the one file rather than the "
+        "model:\n\n"
+        "    from huggingface_hub import snapshot_download\n"
+        "    snapshot_download('ai4bharat/IndicF5',\n"
+        "                      allow_patterns=['checkpoints/vocab.txt'])\n\n"
+        "A 401 here is the gated repo, not a missing file: log in first with "
+        "the token. Or pass the path printed by load_indicf5 as `pattern`.")
 
 
 def read_vocab(path):
