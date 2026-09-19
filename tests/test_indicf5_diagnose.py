@@ -293,13 +293,15 @@ def test_rebinding_does_not_stack_wrappers(monkeypatch):
     monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
     module.reset_mode()
     module.install_patches()
-    real = dict(utils._diagnose_originals)
+    real = {name: getattr(getattr(utils, name), module.WRAPPER_MARK)
+            for name in module.PATCHED}
 
     for _ in range(3):
         monkeypatch.setattr(module, "_mode", dict(module._mode))
         monkeypatch.setattr(module, "_calls", [])
         module.install_patches()
-        assert utils._diagnose_originals == real
+        assert {name: getattr(getattr(utils, name), module.WRAPPER_MARK)
+                for name in module.PATCHED} == real
 
     module._mode["one_chunk"] = True
     run(utils, utils.infer_process, HINDI)
@@ -341,3 +343,88 @@ def test_both_probes_reset_before_they_load_the_model():
         source = __import__("pathlib").Path(name).read_text(encoding="utf-8")
         assert "reset_mode()" in source, name
         assert source.index("reset_mode()") < source.index("load_indicf5()"), name
+
+
+def test_an_unmarked_wrapper_is_refused_rather_than_wrapped(monkeypatch):
+    """
+    The migration case, which cost a second run on 2026-09-19.
+
+    The fix for the first failure recorded the originals in a table on
+    utils_infer. A kernel that still held wrappers from the version BEFORE that
+    fix had no such table, so the new install read the old wrapper as if it
+    were the genuine function and wrapped it. `inspect.signature` of the old
+    wrapper is `(*args, **kwargs)`, so `bound.arguments` had no `ref_audio` and
+    every one of 24 clips raised `KeyError: 'ref_audio'`.
+
+    A side table belongs to the module version that wrote it. The mark has to
+    live on the wrapper, and a wrapper without one cannot be unwrapped at all —
+    the function it replaced is in a closure cell nothing recorded — so the
+    only correct answer is to refuse and say what to do.
+    """
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    genuine = utils.infer_batch_process
+
+    def install_patches():
+        """Stand in for the old install_patches, whose wrappers are nested in it."""
+        def infer_batch_process(*args, **kwargs):
+            return genuine(*args, **kwargs)
+        return infer_batch_process
+
+    unmarked = install_patches()
+    # exactly what an old wrapper looks like: our module, nested in that name
+    unmarked.__module__ = module.__name__
+    unmarked.__qualname__ = "install_patches.<locals>.infer_batch_process"
+    utils.infer_batch_process = unmarked
+
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    with pytest.raises(RuntimeError, match="RESTART THE RUNTIME"):
+        module.install_patches()
+
+    # and it must not have half-installed on the way out
+    assert utils.infer_batch_process is unmarked
+
+
+def test_a_marked_wrapper_is_unwrapped_to_the_real_function(monkeypatch):
+    """The same situation, once the mark exists: rebind, do not refuse."""
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    genuine = {name: getattr(utils, name) for name in module.PATCHED}
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    module.reset_mode()
+    module.install_patches()
+
+    for name in module.PATCHED:
+        assert getattr(getattr(utils, name), module.WRAPPER_MARK) is genuine[name]
+
+    # a second module instance rebinds straight onto the real functions
+    monkeypatch.setattr(module, "_mode", dict(module._mode))
+    monkeypatch.setattr(module, "_calls", [])
+    module.install_patches()
+    for name in module.PATCHED:
+        assert getattr(getattr(utils, name), module.WRAPPER_MARK) is genuine[name]
+
+
+def test_the_signature_bound_is_the_real_one(monkeypatch):
+    """
+    The actual symptom, pinned. A wrapper wrapping a wrapper binds
+    `(*args, **kwargs)` and every named argument disappears.
+    """
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    module.reset_mode()
+    module.install_patches()
+
+    for _ in range(3):
+        monkeypatch.setattr(module, "_mode", dict(module._mode))
+        monkeypatch.setattr(module, "_calls", [])
+        module.install_patches()
+
+    module._mode["one_chunk"] = True
+    module._mode["fix_duration"] = 14.32
+    run(utils, utils.infer_process, HINDI)       # KeyError: 'ref_audio' if stacked
+    assert module._calls[-1]["fix_duration"] == 14.32

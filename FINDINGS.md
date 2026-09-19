@@ -869,10 +869,21 @@ rather than a finding in this document — but it fires *after* the GPU is spent
 Two fixes, and the second is the one that generalises:
 
 - `install_patches()` keys idempotence on the `_mode` object itself rather than a
-  boolean, so a re-imported module rebinds. Originals are cached per function
-  name, because the two can disagree: a caller may have replaced one while our
-  wrapper is still on the other, and taking a wrapper for an original
-  double-wraps it and records every call twice.
+  boolean, so a re-imported module rebinds. It unwraps per function name,
+  because the two can disagree: a caller may have replaced one while our wrapper
+  is still on the other, and taking a wrapper for an original double-wraps it
+  and records every call twice.
+- **The mark that identifies a wrapper lives on the wrapper**, holding the
+  function it replaced. The first attempt at this fix put that in a table on
+  `utils_infer`, which cost a second run: a kernel still holding wrappers from
+  the version *before* the fix had no such table, so the new install read the
+  old wrapper as the genuine function and wrapped it. `inspect.signature` of the
+  old wrapper is `(*args, **kwargs)`, so `bound.arguments` had no `ref_audio`
+  and all 24 clips raised `KeyError: 'ref_audio'`. **A side table belongs to the
+  module version that wrote it.** An unmarked wrapper cannot be unwrapped at all
+  — the function it replaced is in a closure cell nothing recorded — so
+  `install_patches()` refuses and says to restart the runtime, which is the only
+  thing that works.
 - `reset_mode()` puts the injection state back to "inject nothing", and both
   probes call it before they load the model. `_mode` is module-level and
   persists between calls; a probe that sets `fix_duration` and returns leaves it

@@ -119,6 +119,56 @@ def section(title):
     p("=" * 76)
 
 
+PATCHED = ("chunk_text", "infer_batch_process")
+
+# Stamped on every wrapper this module installs, holding the function it
+# replaced. Read from the function object rather than from a table on
+# utils_infer, because a table only exists if the module version that wrote it
+# is the one that installed — and the version before this one wrote none.
+WRAPPER_MARK = "_diagnose_wrapper_of"
+
+
+def _wrapped_by_us(function):
+    """True when `function` is a wrapper this module installed and marked."""
+    return function is not None and hasattr(function, WRAPPER_MARK)
+
+
+def _looks_like_an_unmarked_wrapper(function):
+    """
+    A wrapper from a version of this module that predates the mark.
+
+    It cannot be unwrapped: the function it replaced is in a closure cell and
+    nothing recorded it. Wrapping it again is what produced `KeyError:
+    'ref_audio'` on 24 clips — the new wrapper took `inspect.signature` of the
+    old wrapper, whose signature is `(*args, **kwargs)`, so `bound.arguments`
+    had no `ref_audio` in it.
+    """
+    return (getattr(function, "__module__", None) == __name__
+            and "install_patches.<locals>" in getattr(function, "__qualname__", ""))
+
+
+def _unwrap(utils_infer, name):
+    """The genuine utils_infer function behind `name`, whatever is there now.
+
+    Per name rather than all-or-nothing, because the two can disagree: a caller
+    may have replaced one of them while our wrapper is still on the other, and
+    taking a wrapper for an original records every call twice.
+    """
+    current = getattr(utils_infer, name)
+    if _wrapped_by_us(current):
+        return getattr(current, WRAPPER_MARK)
+    if _looks_like_an_unmarked_wrapper(current):
+        raise RuntimeError(
+            f"utils_infer.{name} is an instrumentation wrapper from an older "
+            "version of colab/indicf5_diagnose, and the function it replaced "
+            "was never recorded, so it cannot be unwrapped. Wrapping it again "
+            "breaks every call. RESTART THE RUNTIME and run again — a git "
+            "pull plus colab.reimport.fresh() cannot repair this, because "
+            "f5_tts is not a package fresh() purges. Costs a model reload."
+        )
+    return current
+
+
 def install_patches():
     """
     Instrument utils_infer in place.
@@ -149,30 +199,13 @@ def install_patches():
     """
     from f5_tts.infer import utils_infer
 
-    wrappers = getattr(utils_infer, "_diagnose_wrappers", {})
-    originals = getattr(utils_infer, "_diagnose_originals", {})
-    installed = all(getattr(utils_infer, name, None) is wrapper
-                    for name, wrapper in wrappers.items()) and bool(wrappers)
-
-    if installed and getattr(utils_infer, "_diagnose_token", None) is _mode:
+    bound_to_us = all(_wrapped_by_us(getattr(utils_infer, name, None))
+                      for name in PATCHED)
+    if bound_to_us and getattr(utils_infer, "_diagnose_token", None) is _mode:
         return
 
-    def real(name):
-        """
-        The genuine utils_infer function behind `name`, whatever is there now.
-
-        Per name rather than all-or-nothing, because the two can disagree: a
-        caller may have replaced one of them while our wrapper is still on the
-        other. Taking a wrapper for an original double-wraps it and every call
-        is then recorded twice.
-        """
-        current = getattr(utils_infer, name)
-        if current is wrappers.get(name):
-            return originals[name]
-        return current
-
-    original_chunk = real("chunk_text")
-    original_batch = real("infer_batch_process")
+    original_chunk = _unwrap(utils_infer, "chunk_text")
+    original_batch = _unwrap(utils_infer, "infer_batch_process")
 
     batch_signature = inspect.signature(original_batch)
 
@@ -265,12 +298,16 @@ def install_patches():
         })
         return result
 
+    # The mark goes ON the wrapper and carries the function it replaced, so a
+    # later install can unwrap it without consulting anything this module
+    # instance wrote down. That is the whole point: side tables belong to the
+    # module version that wrote them, and the version before this one wrote
+    # none.
+    setattr(chunk_text, WRAPPER_MARK, original_chunk)
+    setattr(infer_batch_process, WRAPPER_MARK, original_batch)
+
     utils_infer.chunk_text = chunk_text
     utils_infer.infer_batch_process = infer_batch_process
-    utils_infer._diagnose_originals = {"chunk_text": original_chunk,
-                                       "infer_batch_process": original_batch}
-    utils_infer._diagnose_wrappers = {"chunk_text": chunk_text,
-                                      "infer_batch_process": infer_batch_process}
     # The token is the dictionary the wrappers read, not a boolean. See above.
     utils_infer._diagnose_token = _mode
     utils_infer._diagnose_installed = True
