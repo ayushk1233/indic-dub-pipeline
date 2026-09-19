@@ -1,0 +1,108 @@
+{
+  "_note": "A NEW script, written to test synthesis across a duration ladder rather than to be compared against tape. Nothing here was ever read aloud, so there is NO CONTENT FLOOR for these sentences and no identity ceiling: a CER on this file can only be read against the fixture7_hi control block the same run carries, whose floor is FINDINGS §15's 0.084. Lengths were not chosen and then filled; the sentences were written naturally, sorted by length, and target_s derived from each one's characters at the speaker's own measured in-slot rate of 12.19 cps (fixtures/hi_speaker/slots.json). That keeps the ASKED characters-per-second constant across the whole ladder, so what varies between rows is duration and not pace — the two would otherwise be impossible to separate. The ladder runs about 1.4s to 21.3s. fix_duration forces a single chunk (a chunked generation prepends the reference to every chunk and the total-frame accounting stops meaning anything), so the top of the ladder is ALSO a test of how long one chunk can be: 21s of generation plus a 10s reference is about 31s of total mel, and degradation up there is a chunk-limit finding, not a duration finding. Read the two together. Content is deliberately varied where fixture7_hi is not — a question, a proper noun, code-mixed loanwords, times, a list, and a paragraph-length sentence. reviewed=false: this Hindi was drafted by the assistant, not by the speaker. It is well-formed but it is not his phrasing, and an unnatural sentence makes the test less representative without making it fail. The probe prints every sentence before it spends any GPU and says so; set reviewed=true once a native speaker has read them.",
+  "language": "hi",
+  "purpose": "duration ladder for TTS generation, en_ref and hi_ref arms",
+  "rate_cps": 12.19,
+  "rate_source": "fixtures/hi_speaker/slots.json#measured_cps",
+  "reviewed": false,
+  "floor": null,
+  "control_block": "fixtures/sentences/fixture7_hi.json",
+  "sentences": [
+    {
+      "id": 0,
+      "kind": "short statement",
+      "text": "यह आवाज़ मेरी है।",
+      "chars": 17,
+      "bytes": 45,
+      "target_s": 1.39
+    },
+    {
+      "id": 1,
+      "kind": "question",
+      "text": "क्या आप मुझे साफ़ सुन पा रहे हैं?",
+      "chars": 33,
+      "bytes": 83,
+      "target_s": 2.71
+    },
+    {
+      "id": 2,
+      "kind": "time and numbers",
+      "text": "अगली बैठक सोमवार दोपहर तीन बजे शुरू होगी।",
+      "chars": 41,
+      "bytes": 109,
+      "target_s": 3.36
+    },
+    {
+      "id": 3,
+      "kind": "numbers and a loanword",
+      "text": "पिछले महीने हमने बत्तीस वीडियो डब किए, और सब समय पर पूरे हुए।",
+      "chars": 61,
+      "bytes": 157,
+      "target_s": 5.0
+    },
+    {
+      "id": 4,
+      "kind": "proper noun, code-mix",
+      "text": "मेरा नाम आयुष कुमार है और मैं पिछले दो साल से स्पीच टेक्नोलॉजी पर काम कर रहा हूँ।",
+      "chars": 81,
+      "bytes": 209,
+      "target_s": 6.64
+    },
+    {
+      "id": 5,
+      "kind": "process description",
+      "text": "किसी भी वीडियो को दूसरी भाषा में बदलने के लिए सबसे पहले उसकी आवाज़ को बाकी आवाज़ों से अलग करना पड़ता है।",
+      "chars": 104,
+      "bytes": 270,
+      "target_s": 8.53
+    },
+    {
+      "id": 6,
+      "kind": "a list",
+      "text": "इस पूरे काम में चार हिस्से हैं — आवाज़ पहचानना, उसका अनुवाद करना, नई आवाज़ बनाना, और आखिर में सब कुछ वापस वीडियो के साथ जोड़ना।",
+      "chars": 127,
+      "bytes": 325,
+      "target_s": 10.42
+    },
+    {
+      "id": 7,
+      "kind": "technical, loanwords",
+      "text": "हमारा सिस्टम हर सेगमेंट के लिए छह अलग अनुवाद बनाता है, हर एक की लंबाई नापता है, और उनमें से वही चुनता है जो दिए गए समय में ठीक बैठे और मतलब भी पूरा रखे।",
+      "chars": 152,
+      "bytes": 384,
+      "target_s": 12.47
+    },
+    {
+      "id": 8,
+      "kind": "conditional",
+      "text": "अगर अनुवाद मूल वाक्य से लंबा हो जाए तो उसे उसी समय में कहना पड़ता है, और अगर वह छोटा रह जाए तो बीच में खाली जगह छोड़नी पड़ती है, जो सुनने में अजीब लगता है।",
+      "chars": 155,
+      "bytes": 391,
+      "target_s": 12.72
+    },
+    {
+      "id": 9,
+      "kind": "narrative",
+      "text": "जब मैंने यह काम शुरू किया था तब मुझे लगता था कि सबसे मुश्किल हिस्सा आवाज़ बनाना होगा, लेकिन असली दिक्कत कहीं और निकली — दो भाषाओं की रफ़्तार एक जैसी नहीं होती, और यही सबसे बड़ी चुनौती बनी।",
+      "chars": 188,
+      "bytes": 484,
+      "target_s": 15.42
+    },
+    {
+      "id": 10,
+      "kind": "multi-clause",
+      "text": "हिंदी को कहने में अंग्रेज़ी से लगभग बीस प्रतिशत ज़्यादा समय लगता है, इसलिए हर वाक्य को या तो थोड़ा छोटा करना पड़ता है या थोड़ा तेज़ बोलना पड़ता है, और दोनों में से कोई भी तरीका अपने आप में पूरा हल नहीं है, इसलिए हम दोनों को मिलाकर चलते हैं।",
+      "chars": 240,
+      "bytes": 614,
+      "target_s": 19.69
+    },
+    {
+      "id": 11,
+      "kind": "longest, past the ref",
+      "text": "पिछले कुछ महीनों में हमने सैकड़ों वीडियो पर यह तरीका आज़माया है, अलग अलग बोलने वालों के साथ, अलग अलग विषयों पर, और हर बार एक ही बात सामने आई — जब तक आवाज़ असली न लगे और शब्द सही समय पर न आएं, तब तक दर्शक को कुछ न कुछ खटकता ज़रूर है, चाहे वह बता न पाए कि क्या।",
+      "chars": 259,
+      "bytes": 647,
+      "target_s": 21.25
+    }
+  ]
+}
