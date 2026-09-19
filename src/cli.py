@@ -172,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
             run.stopped_at = GPU_BOUNDARY
             run.message = (
                 f"Stopped at the GPU boundary. Upload {paths.bundle_zip} to the "
-                f"synthesis host, run colab/run_bundle.ipynb, copy the results "
+                f"synthesis host, run `python -m colab.indicf5_worker --bundle "
+                f"<extracted bundle>` (see colab/kaggle.md), copy the results "
                 f"back into {bundle_path}, then resume with "
                 f"--from-stage import"
             )

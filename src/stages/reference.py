@@ -1,7 +1,10 @@
 """
-Build the voice reference XTTS clones from.
+Build the voice reference the TTS model clones from.
 
-This is a small file with an outsized effect on output quality. The first real
+This is a small file with an outsized effect on output quality, and **its
+correct settings differ by model** — see REFERENCE_SECONDS and
+REFERENCE_CEILING_S below. The history here is XTTS's, because XTTS is what
+first exposed each fault; IndicF5 is what ships (FINDINGS §9). The first real
 GPU run cloned from a 16 kHz ASR chunk peaking at 0.21 and scored a mean
 speaker similarity of 0.478, against a floor of 0.75. Two things were wrong
 with that file and both are fixed here rather than on the GPU side, because
@@ -35,9 +38,58 @@ TARGET_PEAK_DBFS = -1.0
 # flatten and max_ref_length would truncate it anyway.
 TARGET_REFERENCE_S = 25.0
 
+# **This length is model-specific and 25 s is actively wrong for IndicF5.**
+#
+# IndicF5 clips reference audio longer than 15 s inside
+# `preprocess_ref_audio_text` and **never truncates `ref_text` to match**
+# (FINDINGS §5d). A 25 s reference therefore hands the model 15 s of audio
+# described by 25 s of transcript, which is the exact mismatch FINDINGS §5
+# identifies behind the original gibberish. §1's shipping configuration is a
+# 10 s clip for precisely this reason, and it is measured: 93% of the
+# calibrated identity scale, 0 prefixes, pace 1.00x.
+#
+# Keyed on the same string as `tts.model` in config/pipeline.yaml, lowercased.
+REFERENCE_SECONDS = {
+    "coqui/xtts_v2": TARGET_REFERENCE_S,
+    "ai4bharat/indicf5": 10.0,
+}
+
+
+# A hard limit, as opposed to the target above. Exceeding the target wastes
+# reference; exceeding this is *wrong*.
+#
+# IndicF5 clips reference audio past 15 s and never truncates `ref_text` to
+# match (FINDINGS §5d), so an over-long clip arrives described by a transcript
+# covering audio the model cannot hear — §5's gibberish. 14 s leaves room for
+# SPAN_PADDING_S and for ffmpeg landing a frame long.
+#
+# XTTS has no such cliff: `max_ref_length` truncates conditioning cleanly and
+# the transcript is not used at all. So it has no ceiling here.
+REFERENCE_CEILING_S = {
+    "ai4bharat/indicf5": 14.0,
+}
+
 # Pad the span outward. Segment boundaries sit at silence edges, and clipping
-# a reference tight to the first phoneme loses the speaker's onset.
+# a reference tight to the first phoneme loses the speaker's onset. Every span
+# costs 2 * this in the finished file, which is why span selection has to
+# account for it before it can respect a ceiling.
 SPAN_PADDING_S = 0.25
+
+
+def reference_ceiling(model: str | None) -> float | None:
+    """The length past which this model's reference is wrong, not just long."""
+    return REFERENCE_CEILING_S.get((model or "").strip().lower())
+
+
+def reference_seconds(model: str | None) -> float:
+    """
+    How much reference audio to cut, for the model that will consume it.
+
+    Unknown models get the XTTS default rather than an error: a reference of
+    the wrong length degrades output, while refusing to build one at all
+    fails the export. The caller that cares should pass a known model.
+    """
+    return REFERENCE_SECONDS.get((model or "").strip().lower(), TARGET_REFERENCE_S)
 
 _MAX_VOLUME_RE = re.compile(r"max_volume:\s*(-?[0-9.]+)\s*dB")
 

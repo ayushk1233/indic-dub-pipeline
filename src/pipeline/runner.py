@@ -20,7 +20,12 @@ from pathlib import Path
 
 from src.orchestrator.models import StageResult, StageStatus
 from src.pipeline.paths import JobPaths
-from src.stages.reference import TARGET_REFERENCE_S, build_reference
+from src.stages.reference import (
+    SPAN_PADDING_S,
+    build_reference,
+    reference_ceiling,
+    reference_seconds,
+)
 
 
 # Stage names, in execution order. `--from-stage` names one of these.
@@ -359,16 +364,52 @@ class PipelineRunner:
             reverse=True,
         )
 
+        target = self._reference_seconds()
+        ceiling = reference_ceiling(self._tts_model())
+
+        # build_reference pads every span outward on both sides, so the file
+        # is longer than the spans by 2 * SPAN_PADDING_S each. Selecting on
+        # the raw span length and then landing over the ceiling is exactly
+        # the mistake this is here to prevent.
+        overhead = 2 * SPAN_PADDING_S
+
         chosen: list[tuple[float, float]] = []
         total = 0.0
 
         for span in spans:
-            if total >= TARGET_REFERENCE_S:
+            if total >= target:
                 break
+
+            predicted = total + (span[1] - span[0]) + overhead
+
+            if ceiling is not None and predicted > ceiling:
+                if chosen:
+                    # A shorter span later in the list may still fit. Taking
+                    # this one would overshoot by up to its whole length.
+                    continue
+                # Nothing chosen yet and even the longest span is too long,
+                # so trim it rather than ship a reference the model will clip
+                # out from under its own transcript.
+                span = (span[0], span[0] + max(ceiling - overhead, 0.0))
+                predicted = ceiling
+
             chosen.append(span)
-            total += span[1] - span[0]
+            total = predicted
 
         return sorted(chosen)
+
+    def _reference_seconds(self) -> float:
+        """
+        How much reference audio this job's TTS model wants.
+
+        Model-specific because IndicF5 silently clips a reference over 15 s
+        without shortening its transcript (FINDINGS §5d), and XTTS wants more
+        than IndicF5 can take. See `src.stages.reference.REFERENCE_SECONDS`.
+        """
+        return reference_seconds(self._tts_model())
+
+    def _tts_model(self) -> str | None:
+        return (self.cfg.get("tts") or {}).get("model")
 
     def _manifest_entries(self) -> list[dict]:
         if not self.paths.manifest.exists():

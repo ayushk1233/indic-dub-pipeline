@@ -10,7 +10,14 @@ translate:
   device: "cpu"
 
 tts:
-  model: "coqui/xtts_v2"
+  # IndicF5 (MIT). XTTS-v2 is CPML and non-commercial, Coqui is defunct, and
+  # fine-tuned checkpoints inherit the licence, so it cannot ship whatever it
+  # scores (FINDINGS §9). It stays in the tree as a calibrated baseline only.
+  #
+  # This string selects the reference clip length, because IndicF5 clips a
+  # reference over 15s without shortening its transcript and XTTS wants 25s.
+  # See src.stages.reference.REFERENCE_SECONDS.
+  model: "ai4bharat/indicf5"
   device: "cuda"
 
 audio:
