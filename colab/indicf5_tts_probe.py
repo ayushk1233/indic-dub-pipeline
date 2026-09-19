@@ -61,7 +61,13 @@ from colab.indicf5_check import (
     normalize,
     transcribe_outputs,
 )
-from colab.indicf5_diagnose import FRAME_RATE, install_patches, _calls, _mode
+from colab.indicf5_diagnose import (
+    FRAME_RATE,
+    install_patches,
+    reset_mode,
+    _calls,
+    _mode,
+)
 from colab.indicf5_english import MAX_LEAD, plain
 from colab.indicf5_hindi_probe import MIN_DEVANAGARI_FRACTION, MIXED_DEVANAGARI_FRACTION
 from src.eval.translation_metrics import script_ratio
@@ -99,6 +105,10 @@ ARMS = {
 }
 DEFAULT_ARMS = ("hi_ref", "en_ref")
 PREFIX_ARMS = ("en_ref", "en_ref_deva")
+
+# The control block is always this arm. It is what §15 measured and the only
+# block in the run with a floor, so it runs whatever the ladder arms are.
+CONTROL_ARM = "hi_ref"
 SEEDS = (0, 1)
 
 REFERENCE_DEVA = FIXTURES / "xlit" / "reference_deva.json"
@@ -286,8 +296,21 @@ def main(arms=DEFAULT_ARMS, seeds=SEEDS, control=True):
 
     blocks = [("ladder", ladder, list(arms), list(seeds))]
     if control:
-        blocks.append(("control", control_sentences(), ["hi_ref"], [0]))
+        # The control is always hi_ref, whatever the ladder arms are — it is
+        # the block §15 measured and the only one with a floor. So its
+        # reference has to be loaded even when it is not an arm being tested,
+        # which a scoped run like main(arms=("en_ref_deva",)) is exactly.
+        if CONTROL_ARM not in references:
+            filename, key = ARMS[CONTROL_ARM]
+            path = FIXTURES / filename
+            text = plain(transcripts[key]["text"])
+            references[CONTROL_ARM] = (path, sf.info(str(path)).duration, text)
+            p(f"  control   {CONTROL_ARM} loaded for the control block only")
+        blocks.append(("control", control_sentences(), [CONTROL_ARM], [0]))
 
+    # Before anything: _mode persists between calls and a probe that
+    # returned without clearing it leaves its last fix_duration behind.
+    reset_mode()
     install_patches()
     model = load_indicf5()
 

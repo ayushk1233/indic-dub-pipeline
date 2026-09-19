@@ -121,16 +121,59 @@ def section(title):
 
 def install_patches():
     """
-    Instrument utils_infer in place. Idempotent, so a second import or a
-    re-run inside the same kernel does not stack wrappers.
+    Instrument utils_infer in place.
+
+    Idempotent, so a second import or a re-run inside the same kernel does not
+    stack wrappers — but idempotent **per module instance**, which is the part
+    that was wrong and cost a run.
+
+    The wrappers close over this module's `_mode` and `_calls`. `f5_tts` is not
+    ours and is not purged by colab/reimport.py's `fresh()`, so after a
+    re-import the wrappers on utils_infer still point at the PREVIOUS
+    `colab.indicf5_diagnose`'s dictionaries while every caller writes to the
+    new ones. The old guard was a plain boolean on utils_infer, so
+    install_patches() returned early and never rebound them.
+
+    Measured 2026-09-19. A run after `fresh()` in a live kernel produced 24
+    clips at exactly 3.82s each, whatever the text: 3.82s was the target of the
+    LAST clip of the previous run, still sitting in the previous module's
+    `_mode["fix_duration"]`. `one_chunk` was stale the same way, `_calls` never
+    filled, and every `requested_s` came back nan. The report's instrumentation
+    guard would have caught it — that is what it is for — but nothing stopped
+    the GPU being spent first.
+
+    The token is this module's `_mode` object itself, so the check is exactly
+    "are the installed wrappers reading the dictionaries this module is
+    writing", which is the real question. Originals are cached on utils_infer
+    so rebinding replaces the wrappers rather than wrapping them again.
     """
     from f5_tts.infer import utils_infer
 
-    if getattr(utils_infer, "_diagnose_installed", False):
+    wrappers = getattr(utils_infer, "_diagnose_wrappers", {})
+    originals = getattr(utils_infer, "_diagnose_originals", {})
+    installed = all(getattr(utils_infer, name, None) is wrapper
+                    for name, wrapper in wrappers.items()) and bool(wrappers)
+
+    if installed and getattr(utils_infer, "_diagnose_token", None) is _mode:
         return
 
-    original_chunk = utils_infer.chunk_text
-    original_batch = utils_infer.infer_batch_process
+    def real(name):
+        """
+        The genuine utils_infer function behind `name`, whatever is there now.
+
+        Per name rather than all-or-nothing, because the two can disagree: a
+        caller may have replaced one of them while our wrapper is still on the
+        other. Taking a wrapper for an original double-wraps it and every call
+        is then recorded twice.
+        """
+        current = getattr(utils_infer, name)
+        if current is wrappers.get(name):
+            return originals[name]
+        return current
+
+    original_chunk = real("chunk_text")
+    original_batch = real("infer_batch_process")
+
     batch_signature = inspect.signature(original_batch)
 
     def chunk_text(text, max_chars=135):
@@ -224,7 +267,28 @@ def install_patches():
 
     utils_infer.chunk_text = chunk_text
     utils_infer.infer_batch_process = infer_batch_process
+    utils_infer._diagnose_originals = {"chunk_text": original_chunk,
+                                       "infer_batch_process": original_batch}
+    utils_infer._diagnose_wrappers = {"chunk_text": chunk_text,
+                                      "infer_batch_process": infer_batch_process}
+    # The token is the dictionary the wrappers read, not a boolean. See above.
+    utils_infer._diagnose_token = _mode
     utils_infer._diagnose_installed = True
+
+
+def reset_mode():
+    """
+    Put the injection state back to "inject nothing".
+
+    `_mode` is module-level and persists between calls, so a probe that sets
+    fix_duration and then returns leaves it set. The next caller that forgets
+    to set it inherits the previous run's last duration — which is exactly the
+    number that came back 24 times on 2026-09-19. Probes call this before they
+    start rather than relying on every path setting every key.
+    """
+    _mode.update({"speed": None, "one_chunk": False, "fix_duration": None})
+    _calls.clear()
+    _pending.clear()
 
 
 def correlation(xs, ys):

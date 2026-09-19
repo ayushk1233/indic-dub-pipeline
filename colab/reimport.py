@@ -18,6 +18,23 @@ of a parameter that had not been in the working tree for an hour.
     probe = fresh("colab.indicf5_xlit_probe")
 
 Restarting the runtime does the same thing and costs the loaded models.
+
+**What `fresh()` cannot fix, and once made worse.** It purges `colab` and
+`src`. It does not purge `f5_tts`, which is not ours — so anything of ours
+that has been *installed into* a third-party module survives the purge while
+the module that owns its state is replaced underneath it.
+
+`colab/indicf5_diagnose.install_patches()` does exactly that: its wrappers
+close over that module's `_mode` and `_calls`. Measured 2026-09-19 — after a
+`fresh()` in a live kernel, the wrappers on `utils_infer` still read the
+previous module instance's dictionaries while the probe wrote to the new ones.
+`fix_duration` and `one_chunk` were never applied, `_calls` never filled, and
+24 clips came back at exactly 3.82 s whatever the text: 3.82 s was the target
+of the last clip of the PREVIOUS run, still sitting in the old `_mode`.
+
+`install_patches()` now keys its idempotence on the `_mode` object itself
+rather than a boolean, so a re-imported module rebinds. If you install
+anything else into a package this does not purge, it needs the same treatment.
 """
 
 import importlib

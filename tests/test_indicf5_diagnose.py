@@ -234,3 +234,110 @@ def test_english_reference_splits_a_real_length_sentence(diag):
     hindi_chunks = module._calls[-1]["chunks"]
 
     assert english_chunks > hindi_chunks
+
+
+# ------------------------------------ surviving colab/reimport.py's fresh()
+
+
+def test_a_reimported_module_rebinds_the_patch(monkeypatch):
+    """
+    The failure that cost a run on 2026-09-19.
+
+    The wrappers close over this module's `_mode` and `_calls`. `f5_tts` is not
+    ours, so `fresh()` does not purge it: after a re-import the wrappers still
+    point at the PREVIOUS module's dictionaries while every caller writes to
+    the new ones. The old guard was a boolean on utils_infer, so
+    install_patches() returned early and never rebound them.
+
+    What came out was 24 clips at exactly 3.82s whatever the text — 3.82s being
+    the target of the last clip of the previous run, still sitting in the old
+    `_mode["fix_duration"]`. Nothing raised.
+    """
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    monkeypatch.setattr(utils, "_diagnose_installed", False, raising=False)
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    module.reset_mode()
+    module.install_patches()
+
+    # Stand in for what `fresh()` leaves behind: a different module object with
+    # its own _mode, against a utils_infer still holding the old wrappers.
+    stale_mode, stale_calls = module._mode, module._calls
+    monkeypatch.setattr(module, "_mode", dict(stale_mode))
+    monkeypatch.setattr(module, "_calls", [])
+    assert module._mode is not stale_mode
+
+    module.install_patches()
+    assert utils._diagnose_token is module._mode, "patch still reads the old dict"
+
+    module._mode["one_chunk"] = True
+    module._mode["fix_duration"] = 14.32
+    run(utils, utils.infer_process, LONG_HINDI)
+
+    assert module._calls, "the new module's _calls never filled"
+    assert stale_calls == [], "the stale module's _calls filled instead"
+    assert module._calls[-1]["fix_duration"] == 14.32
+    assert module._calls[-1]["chunks"] == 1
+
+
+def test_rebinding_does_not_stack_wrappers(monkeypatch):
+    """
+    Each rebind must replace the wrapper, not wrap it. A stacked wrapper would
+    record every call twice and halve every rate derived from the count.
+    """
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    monkeypatch.setattr(utils, "_diagnose_installed", False, raising=False)
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    module.reset_mode()
+    module.install_patches()
+    real = dict(utils._diagnose_originals)
+
+    for _ in range(3):
+        monkeypatch.setattr(module, "_mode", dict(module._mode))
+        monkeypatch.setattr(module, "_calls", [])
+        module.install_patches()
+        assert utils._diagnose_originals == real
+
+    module._mode["one_chunk"] = True
+    run(utils, utils.infer_process, HINDI)
+    assert len(module._calls) == 1, "one call recorded more than once"
+
+
+def test_reset_mode_clears_a_duration_left_by_the_previous_run(monkeypatch):
+    """
+    `_mode` is module-level and persists between calls. A probe that sets
+    fix_duration and returns leaves it set, and the next caller that does not
+    set it inherits the previous run's LAST duration rather than the byte
+    formula — which is not a state anything downstream can detect.
+    """
+    utils = build_fake_f5(monkeypatch)
+    module = pytest.importorskip("colab.indicf5_diagnose")
+
+    monkeypatch.setattr(utils, "_diagnose_installed", False, raising=False)
+    monkeypatch.setattr(utils, "_diagnose_token", None, raising=False)
+    module.install_patches()
+
+    module._mode.update({"fix_duration": 14.32, "one_chunk": True})
+    module._calls.append({"stale": True})
+
+    module.reset_mode()
+    assert module._mode == {"speed": None, "one_chunk": False,
+                            "fix_duration": None}
+    assert module._calls == []
+
+    run(utils, utils.infer_process, HINDI)
+    assert module._calls[-1]["fix_duration"] is None
+
+
+def test_both_probes_reset_before_they_load_the_model():
+    """
+    Reset has to happen before the GPU is spent, not after the run, or a stale
+    duration is only discovered once the clips exist.
+    """
+    for name in ("colab/indicf5_tts_probe.py", "colab/indicf5_hindi_probe.py"):
+        source = __import__("pathlib").Path(name).read_text(encoding="utf-8")
+        assert "reset_mode()" in source, name
+        assert source.index("reset_mode()") < source.index("load_indicf5()"), name

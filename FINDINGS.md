@@ -842,6 +842,50 @@ replacement**, and the next container restores it only from the last saved versi
 
 ---
 
+### 13a. `fresh()` silently unbinds the instrumentation
+
+`colab/reimport.py` exists because reloading one module leaves everything
+underneath it stale. It purges `colab` and `src` — and not `f5_tts`, which is not
+ours. Anything of ours that has been *installed into* a third-party module
+therefore survives the purge while the module owning its state is replaced
+underneath it.
+
+`install_patches()` is exactly that. Its wrappers close over
+`colab.indicf5_diagnose`'s `_mode` and `_calls`, and its idempotence guard was a
+boolean on `utils_infer`, so after a `fresh()` it returned early and never
+rebound them.
+
+Measured 2026-09-19. A scoped run after `git pull` and `fresh()` in a live kernel
+produced **24 clips at exactly 3.82 s each, whatever the text** — 1.4 s targets
+and 21.2 s targets alike. 3.82 s was the target of the *last clip of the previous
+run*, still sitting in the previous module instance's
+`_mode["fix_duration"]`. `one_chunk` was stale the same way, `_calls` never
+filled, and every `requested_s` came back `nan`.
+
+Nothing raised. The probe's instrumentation guard would have refused to report —
+that is what it is for, and it is the reason this is a wasted twenty minutes
+rather than a finding in this document — but it fires *after* the GPU is spent.
+
+Two fixes, and the second is the one that generalises:
+
+- `install_patches()` keys idempotence on the `_mode` object itself rather than a
+  boolean, so a re-imported module rebinds. Originals are cached per function
+  name, because the two can disagree: a caller may have replaced one while our
+  wrapper is still on the other, and taking a wrapper for an original
+  double-wraps it and records every call twice.
+- `reset_mode()` puts the injection state back to "inject nothing", and both
+  probes call it before they load the model. `_mode` is module-level and
+  persists between calls; a probe that sets `fix_duration` and returns leaves it
+  set, and the next caller that forgets to set it inherits the previous run's
+  last duration instead of the byte formula. That is not a state anything
+  downstream can detect.
+
+**The general rule:** if you install something into a package `fresh()` does not
+purge, its idempotence guard must identify *which instance* of your module it is
+bound to, not merely that some instance is.
+
+---
+
 ## 14. What turned out to be wrong
 
 Kept because a later session finding these cited elsewhere needs to know they do not hold.
@@ -870,6 +914,7 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | `hi -> hi` is already good | It is — but nobody had measured it. §7's 0.719 is XTTS-v2 on a different scale, and no IndicF5 number for the Hindi leg existed until §15. Two of the product's four legs were being carried on an inference from the third. |
 | A 0.9 script gate protects a Hindi content number | It excluded five clips that had said the right words, because Hindi writes English loanwords in Devanagari and Whisper writes them in either script. All five fell on the two loanword-heavy sentences, so the exclusions were not random: the arm's mean improved by losing its hardest clips and the only clip over `MAX_CER` (§15a). |
 | `floor_rows()` makes a CER impossible to read against zero | Only if the clips are on the host. `.gitignore` un-ignores `fixtures/en_speaker/*.wav` by name, so `slots.json` reached Kaggle and the seven Hindi clips did not; the function returned an empty list and the report printed a verdict under `floor (him) cer -`. A guard that fails open is not a guard (§15a). |
+| `fresh()` is the safe way to pick up a pull in a live kernel | Only for modules it purges. It does not purge `f5_tts`, so the instrumentation installed there kept reading the previous module instance's `_mode` — 24 clips at a frozen 3.82 s, `_calls` empty, nothing raised (§13a). |
 | The residual prefix is specific to the English route | Sharper than that: it belongs to the English **reference**. Every clip in §16 generates Hindi and `en_ref` still produced four leading prefixes, one of them the literal English word *question*. `hi_ref` produced none in 24. It is a cross-script reference artifact, it is seed-dependent, and it is in the shipping configuration (§16b). |
 | `en -> hi` and `hi -> hi` differ, so the reference language matters | Only at the ends of the ladder. Between 2.7s and 19.7s the two arms sit at 0.049 and 0.047. The whole 0.026 headline gap is the 1.4s row and the 21.2s row (§16). |
 

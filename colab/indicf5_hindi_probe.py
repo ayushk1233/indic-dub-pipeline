@@ -69,7 +69,13 @@ from colab.indicf5_check import (
     load_indicf5,
     transcribe_outputs,
 )
-from colab.indicf5_diagnose import FRAME_RATE, install_patches, _calls, _mode
+from colab.indicf5_diagnose import (
+    FRAME_RATE,
+    install_patches,
+    reset_mode,
+    _calls,
+    _mode,
+)
 from colab.indicf5_english import MAX_LEAD, plain
 from src.text.loanwords import fold_loanwords, latin_words
 from src.eval.translation_metrics import script_ratio
@@ -346,6 +352,9 @@ def main(seeds=SEEDS, require_floor=True):
     p("  would be caught, and a report that changes shape between runs is")
     p("  harder to read than one that repeats an easy pass.")
 
+    # Before anything: _mode persists between calls and a probe that
+    # returned without clearing it leaves its last fix_duration behind.
+    reset_mode()
     install_patches()
     model = load_indicf5()
 
