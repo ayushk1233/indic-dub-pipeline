@@ -14,7 +14,7 @@ from src.stages.tts.models import (
 
 MODEL_ID = "tts_models/multilingual/multi-dataset/xtts_v2"
 
-SUPPORTED_BUNDLE_VERSIONS = {"1.0", "1.1"}
+SUPPORTED_BUNDLE_VERSIONS = {"1.0", "1.1", "1.2"}
 
 # Conditioning settings established in colab/xtts.md. These belong to
 # get_conditioning_latents(); passing them to inference() silently does nothing.

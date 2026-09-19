@@ -16,6 +16,14 @@ class SynthesisSegment(BaseModel):
 
     reference_audio: str
 
+    # How long this segment may take to speak, pooling the pause that
+    # follows it (src.eval.translation_metrics.speaking_budgets). This, not
+    # end_ts - start_ts, is what length control chose the text against, and
+    # so it is what synthesis must be asked for: forcing the clip into the
+    # bare slot over-compresses it and leaves the assembly cascade's stretch
+    # and drift tiers nothing to absorb. Optional so bundle 1.1 still parses.
+    budget_s: float | None = None
+
 
 class SynthesisRequest(BaseModel):
     """

@@ -150,6 +150,9 @@ class PipelineRunner:
         with open(self.paths.transcript, "r", encoding="utf-8") as f:
             transcript = TranscriptResult(**json.load(f))
 
+        if transcript.language == self.target_language:
+            return self._passthrough(transcript)
+
         translate_cfg = self.cfg["translate"]
 
         backend = IndicTrans2Backend(
@@ -184,6 +187,57 @@ class PipelineRunner:
             length_controlled=bool(selections),
         )
 
+    def _passthrough(self, transcript) -> StageResult:
+        """
+        Source and target are the same language, so there is nothing to
+        translate.
+
+        Not a special case worth apologising for: `hi -> hi` is a real leg of
+        this product (voice cloning rather than dubbing), and the configured
+        model is `indictrans2-en-indic-1B`, which only ever goes out of
+        English. Handing it `hin_Deva -> hin_Deva` would produce a confident
+        wrong answer rather than an error.
+
+        Length control is skipped with it. Its job is to pick the candidate
+        that fits the original slot, and the source text already occupies that
+        slot exactly — it is what the speaker said in it.
+        """
+        from src.stages.translation.models import (
+            TranslatedSegment,
+            TranslationResult,
+        )
+
+        translation = TranslationResult(
+            job_id=transcript.job_id,
+            source_language=transcript.language,
+            target_language=self.target_language,
+            segments=[
+                TranslatedSegment(
+                    segment_id=segment.segment_id,
+                    chunk_id=segment.chunk_id,
+                    start_ts=segment.start_ts,
+                    end_ts=segment.end_ts,
+                    source_text=segment.text,
+                    translated_text=segment.text,
+                    source_language=transcript.language,
+                    target_language=self.target_language,
+                )
+                for segment in transcript.segments
+            ],
+        )
+
+        _write_json(self.paths.translation, translation.model_dump())
+
+        return _done(
+            "translate",
+            self.paths.translation,
+            latency_ms=0.0,
+            num_segments=len(translation.segments),
+            num_candidates=1,
+            length_controlled=False,
+            passthrough=True,
+        )
+
     def _translate_with_length_control(self, transcript, backend):
         """
         Translate each segment by generating several candidates and keeping the
@@ -195,7 +249,7 @@ class PipelineRunner:
             TranslatedSegment,
             TranslationResult,
         )
-        from src.eval.translation_metrics import MIN_GAP_S
+        from src.eval.translation_metrics import speaking_budgets
 
         duration_model = self.duration_model or DurationModelSet()
         segments = transcript.segments
@@ -203,16 +257,14 @@ class PipelineRunner:
         translated: list[TranslatedSegment] = []
         selections: list[dict] = []
 
+        budgets = speaking_budgets(segments)
+
         for index, segment in enumerate(segments):
             # Budget pools the pause that follows, matching the arithmetic the
-            # feasibility check and the assembly cascade both use.
-            if index + 1 < len(segments):
-                next_start = segments[index + 1].start_ts
-            else:
-                next_start = segment.end_ts
-
+            # feasibility check, the assembly cascade and the synthesis
+            # request all use.
             slot = max(segment.end_ts - segment.start_ts, 1e-6)
-            budget = max(next_start - segment.start_ts - MIN_GAP_S, slot)
+            budget = max(budgets[index], slot)
 
             texts = backend.translate_candidates(
                 segment.text,

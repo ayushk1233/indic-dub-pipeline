@@ -82,6 +82,39 @@ IMPOSSIBLE_THRESHOLD = 1.5
 MIN_GAP_S = 0.12
 
 
+def speaking_budgets(segments, total_duration=None) -> list[float]:
+    """
+    How long each segment may actually take to speak.
+
+    Not the slot. A segment may run past its own end into the pause that
+    follows it, and the assembly cascade is built to absorb exactly that, so
+    the budget pools the gap up to the next segment's start less MIN_GAP_S.
+
+    This has to be one function because three callers must agree: length
+    control chooses a candidate against it, the feasibility check flags
+    segments against it, and the synthesis request carries it to the GPU so
+    `fix_duration` asks for the span that was actually planned for. When they
+    disagreed, translation targeted the budget and synthesis was forced into
+    the slot — over-compressing every segment and leaving the stretch and
+    drift tiers nothing to do.
+    """
+    budgets = []
+    count = len(segments)
+
+    for index, segment in enumerate(segments):
+        if index + 1 < count:
+            next_start = segments[index + 1].start_ts
+        elif total_duration is not None:
+            next_start = total_duration
+        else:
+            next_start = segment.end_ts
+
+        slot = segment.end_ts - segment.start_ts
+        budgets.append(max(next_start - segment.start_ts - MIN_GAP_S, slot))
+
+    return budgets
+
+
 def natural_cps(language: str) -> float:
     return NATURAL_CPS.get(language, DEFAULT_NATURAL_CPS)
 
@@ -263,15 +296,10 @@ def evaluate_translation(
 
     fitness: list[SegmentFitness] = []
 
-    for index, segment in enumerate(segments):
-        if index + 1 < num_segments:
-            next_start = segments[index + 1].start_ts
-        elif total_duration is not None:
-            next_start = total_duration
-        else:
-            next_start = segment.end_ts
+    budgets = speaking_budgets(segments, total_duration)
 
-        budget = max(next_start - segment.start_ts - MIN_GAP_S, segment.end_ts - segment.start_ts)
+    for index, segment in enumerate(segments):
+        budget = budgets[index]
 
         fitness.append(
             evaluate_segment_fitness(

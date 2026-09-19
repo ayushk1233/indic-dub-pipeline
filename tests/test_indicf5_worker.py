@@ -38,8 +38,9 @@ REFERENCE_SECONDS = 10.0
 SAMPLE_RATE = 24000
 
 
-def build_bundle(tmp_path, *, version="1.1", reference_text="So let me tell you.",
-                 slots=(2.0, 3.0), reference_seconds=REFERENCE_SECONDS):
+def build_bundle(tmp_path, *, version="1.2", reference_text="So let me tell you.",
+                 slots=(2.0, 3.0), reference_seconds=REFERENCE_SECONDS,
+                 budgets=None):
     """A bundle on disk, exactly as BundleExporter writes one."""
     bundle = tmp_path / "tts_bundle"
     (bundle / "request").mkdir(parents=True)
@@ -57,6 +58,7 @@ def build_bundle(tmp_path, *, version="1.1", reference_text="So let me tell you.
             start_ts=start, end_ts=start + slot,
             text="यह आवाज़ मेरी है।",
             reference_audio="request/reference.wav",
+            budget_s=None if budgets is None else budgets[index],
         ))
         start += slot
 
@@ -344,3 +346,128 @@ def test_a_reference_past_the_clipping_threshold_warns(tmp_path, worker, capsys)
     w.prepare_reference()
 
     assert "does NOT" in capsys.readouterr().out
+
+
+# -- the budget, which is not the slot ---------------------------------------
+
+
+def test_the_span_asked_for_is_the_budget_the_text_was_chosen_against(
+        tmp_path, worker):
+    """
+    Length control picks a candidate that fits `budget_s`, which pools the
+    pause after the segment; the assembly cascade absorbs the overhang. On
+    english.mov ten of fourteen segments had no candidate that fit even the
+    budget, so compressing further into the bare slot is compression this
+    pipeline never asked for.
+    """
+    bundle = build_bundle(tmp_path, slots=(2.0,), budgets=(3.4,))
+    w = worker(bundle)
+
+    w.synthesize_segment(w.request.segments[0])
+
+    assert w.model.seen[0]["fix_duration"] == REFERENCE_SECONDS + 3.4
+
+
+def test_a_bundle_without_a_budget_falls_back_to_the_slot(tmp_path, worker):
+    """Bundle 1.1 carries no budget. Falling back must not raise."""
+    bundle = build_bundle(tmp_path, version="1.1", slots=(2.0,), budgets=None)
+    w = worker(bundle)
+
+    w.synthesize_segment(w.request.segments[0])
+
+    assert w.model.seen[0]["fix_duration"] == REFERENCE_SECONDS + 2.0
+
+
+def test_the_cap_is_applied_to_the_budget_not_the_slot(tmp_path, worker):
+    """
+    A short slot with a long budget still generates for the whole budget, so
+    it is the budget that can cross the single-chunk cap (§16a).
+    """
+    bundle = build_bundle(tmp_path, slots=(2.0,),
+                          budgets=(MAX_FIXED_SPAN_S + 5.0,))
+    w = worker(bundle)
+
+    w.synthesize_segment(w.request.segments[0])
+
+    assert w.model.seen[0]["fix_duration"] is None
+
+
+def test_the_exported_bundle_carries_a_budget_for_every_segment():
+    """
+    The worker's fallback is silent by design, so nothing downstream would
+    notice the exporter quietly dropping the field.
+    """
+    from src.stages.tts.processor import TTSProcessor
+    from src.stages.translation.models import (
+        TranslatedSegment,
+        TranslationResult,
+    )
+
+    translation = TranslationResult(
+        job_id="t", source_language="en", target_language="hi",
+        segments=[
+            TranslatedSegment(
+                segment_id=i, chunk_id=0,
+                start_ts=float(i * 5), end_ts=float(i * 5) + 2.0,
+                source_text="x", translated_text="y",
+                source_language="en", target_language="hi",
+            )
+            for i in range(3)
+        ],
+    )
+
+    request = TTSProcessor().build_request(translation, "request/reference.wav")
+
+    assert all(s.budget_s is not None for s in request.segments)
+    # The pause after each of the first two is pooled, so the budget exceeds
+    # the 2s slot; the last has no follower and keeps its slot.
+    assert request.segments[0].budget_s > 2.0
+    assert request.segments[-1].budget_s == pytest.approx(2.0)
+
+
+# -- Latin loanwords in the generated text -----------------------------------
+
+
+def test_a_latin_loanword_is_folded_before_the_model_sees_it(tmp_path, worker):
+    """
+    Hindi ASR writes English loanwords in Latin, and IndicF5 cannot generate
+    English (§4). Two of sixteen segments from hindi.mov carried one —
+    `project` and `fit` — and both are in the table.
+    """
+    bundle = build_bundle(tmp_path, slots=(2.0,))
+    w = worker(bundle)
+    w.request.segments[0].text = "ये project असल में क्या करता है"
+
+    w.synthesize_segment(w.request.segments[0])
+
+    sent = w.model.seen[0]["text"]
+    assert "project" not in sent
+    assert "प्रोजेक्ट" in sent
+
+
+def test_an_unmapped_latin_word_is_reported_rather_than_guessed(
+        tmp_path, worker, capsys):
+    """
+    Guessing a Devanagari spelling is the drafting judgement §4f reserves for
+    a human. Passing it through silently is the failure the listener hears.
+    """
+    bundle = build_bundle(tmp_path, slots=(2.0,))
+    w = worker(bundle)
+    w.request.segments[0].text = "ये kubernetes असल में क्या करता है"
+
+    w.synthesize_segment(w.request.segments[0])
+
+    out = capsys.readouterr().out
+    assert "kubernetes" in out
+    assert "loanword table" in out
+
+
+def test_folding_leaves_devanagari_alone(tmp_path, worker):
+    bundle = build_bundle(tmp_path, slots=(2.0,))
+    w = worker(bundle)
+    original = "यह आवाज़ मेरी है।"
+    w.request.segments[0].text = original
+
+    w.synthesize_segment(w.request.segments[0])
+
+    assert w.model.seen[0]["text"] == original

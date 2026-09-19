@@ -55,9 +55,11 @@ class BundleExporter:
         # Build and write manifest
         manifest = BundleManifest(
             metadata=BundleMetadata(
-                # 1.1 adds SynthesisRequest.reference_text. Readers of 1.0
-                # ignore the extra field, so this stays backward compatible.
-                bundle_version="1.1",
+                # 1.1 adds SynthesisRequest.reference_text.
+                # 1.2 adds SynthesisSegment.budget_s. Both are additive and
+                # optional, so an older reader ignores the extra field and a
+                # newer one falls back when it is absent.
+                bundle_version="1.2",
                 job_id=request.job_id,
                 created_at=datetime.utcnow().isoformat() + "Z",
             ),

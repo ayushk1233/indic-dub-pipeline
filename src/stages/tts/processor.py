@@ -12,8 +12,12 @@ class TTSProcessor:
         reference_audio: str,
         reference_text: str | None = None,
     ) -> SynthesisRequest:
+        from src.eval.translation_metrics import speaking_budgets
+
+        budgets = speaking_budgets(translation_result.segments)
+
         segments = []
-        for segment in translation_result.segments:
+        for index, segment in enumerate(translation_result.segments):
             segments.append(
                 SynthesisSegment(
                     segment_id=segment.segment_id,
@@ -22,6 +26,7 @@ class TTSProcessor:
                     end_ts=segment.end_ts,
                     text=segment.translated_text,
                     reference_audio=reference_audio,
+                    budget_s=budgets[index],
                 )
             )
 

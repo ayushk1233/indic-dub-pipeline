@@ -19,6 +19,15 @@ somewhere, and what does not fit the conditioned frames is spoken at the start
 of the kept region. This is model policy, so it lives behind the backend
 boundary and not in `src/`.
 
+**Latin loanwords are folded to their conventional Devanagari spelling.**
+Hindi ASR writes English loanwords in Latin — `project`, `fit` — and IndicF5
+cannot generate English (FINDINGS §4), so a Latin word inside a Devanagari
+sentence is a word it cannot say. `fixtures/loanwords_hi.json` holds the
+conventional Hindi spelling of each, which is the form IndicF5's training text
+actually contains. Anything Latin that survives the fold is warned about
+rather than silently synthesized, because that is the case the table does not
+cover and a listener will hear.
+
 **Duration is set per segment, not left to the model.** FINDINGS §5a: IndicF5
 allocates duration from the reference's UTF-8 byte ratio, which is wrong by
 2.46x when a Latin transcript describes a clip that will generate Devanagari.
@@ -55,7 +64,7 @@ MODEL_ID = "ai4bharat/IndicF5"
 # 1.0 has no `reference_text` field at all. XTTS can run such a bundle;
 # IndicF5 cannot clone from audio alone, so accepting one would mean
 # synthesizing in some other voice and reporting success.
-SUPPORTED_BUNDLE_VERSIONS = {"1.1"}
+SUPPORTED_BUNDLE_VERSIONS = {"1.1", "1.2"}
 
 # IndicF5 generates at 24 kHz through Vocos. The bundle asks for a rate and
 # the two have always agreed; if they ever stop, resampling belongs here
@@ -179,6 +188,29 @@ class IndicF5Worker:
 
         return self.reference_seconds, self.reference_text
 
+    def prepare_text(self, text: str) -> str:
+        """
+        The Devanagari the model will actually be asked to say.
+
+        Only a loanword fold, and deliberately only that: a 13-entry table of
+        English words whose Hindi spelling is conventional and was checked
+        against the corpus. It is not a transliterator and must not become
+        one — see src/text/loanwords.py. A Latin word outside the table is
+        left alone and reported, because guessing its Devanagari spelling is
+        exactly the drafting judgement §4f says belongs to a human.
+        """
+        from src.text.loanwords import fold_loanwords, latin_words
+
+        folded = fold_loanwords(text or "", "hi")
+        left = latin_words(folded)
+
+        if left:
+            print(f"  !! Latin words IndicF5 cannot say, and not in the "
+                  f"loanword table: {left}. Add them to "
+                  f"fixtures/loanwords_hi.json or expect nonsense here.")
+
+        return folded
+
     # -- model ---------------------------------------------------------------
 
     def load_model(self):
@@ -208,36 +240,48 @@ class IndicF5Worker:
         from colab.indicf5_diagnose import _calls, _mode
 
         slot = float(segment.end_ts - segment.start_ts)
+
+        # Ask for the span the text was CHOSEN against, not the bare slot.
+        # Length control picks a candidate that fits `budget_s`, which pools
+        # the pause after the segment, and the assembly cascade is built to
+        # absorb the overhang. Forcing the clip into `slot` would compress it
+        # by budget/slot on top of whatever overflow the text already has —
+        # on english.mov that is up to 1.17x of extra compression for nothing.
+        # 1.1 bundles carry no budget, so they fall back to the slot.
+        span = float(segment.budget_s) if segment.budget_s else slot
+
         sample_rate = self.request.output_sample_rate
 
         # fix_duration sets TOTAL frames, reference included (FINDINGS §5a).
-        fixed = slot <= MAX_FIXED_SPAN_S
+        fixed = span <= MAX_FIXED_SPAN_S
         _mode["speed"] = None
         _mode["one_chunk"] = fixed
         _mode["fix_duration"] = (
-            self.reference_seconds + slot if fixed else None
+            self.reference_seconds + span if fixed else None
         )
         _calls.clear()
 
         if not fixed:
             print(
-                f"  segment {segment.segment_id} asks for {slot:.1f}s, past "
+                f"  segment {segment.segment_id} asks for {span:.1f}s, past "
                 f"the {MAX_FIXED_SPAN_S:.0f}s single-chunk cap (§16a). "
                 "Falling back to the model's own chunking, which will not "
                 "hit the slot."
             )
 
+        text = self.prepare_text(segment.text)
+
         print(
             f"Synthesizing segment {segment.segment_id} "
-            f"(chunk {segment.chunk_id}, {len(segment.text)} chars, "
-            f"{slot:.2f}s slot)..."
+            f"(chunk {segment.chunk_id}, {len(text)} chars, "
+            f"{slot:.2f}s slot, {span:.2f}s budget)..."
         )
 
         started = time.perf_counter()
 
         with torch.no_grad():
             audio = self.model(
-                segment.text,
+                text,
                 ref_audio_path=str(self.reference_path),
                 ref_text=self.reference_text,
             )
@@ -277,10 +321,10 @@ class IndicF5Worker:
         sf.write(str(output_path), wav, sample_rate, subtype="PCM_16")
 
         elapsed = time.perf_counter() - started
-        ratio = duration / slot if slot else float("nan")
+        ratio = duration / span if span else float("nan")
 
         print(
-            f"  {duration:.2f}s audio for a {slot:.2f}s slot "
+            f"  {duration:.2f}s audio for a {span:.2f}s budget "
             f"(ratio {ratio:.2f}), sampler span "
             f"{'-' if generated_span is None else f'{generated_span:.2f}s'}, "
             f"fix_duration "
@@ -314,6 +358,7 @@ class IndicF5Worker:
                 "fix_duration": "reference_seconds + slot_seconds",
                 "reference_seconds": self.reference_seconds,
                 "reference_text_normalization": "plain",
+                "generated_text_normalization": "fold_loanwords",
                 "max_fixed_span_s": MAX_FIXED_SPAN_S,
             },
             segments=sorted(self.synthesized, key=lambda s: s.segment_id),

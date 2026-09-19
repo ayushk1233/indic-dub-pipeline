@@ -36,6 +36,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", required=True, help="Source video or audio file.")
     parser.add_argument("--job-id", required=True, help="Names the artifact directory.")
     parser.add_argument("--target-lang", default="hi", help="Two-letter target code.")
+    parser.add_argument(
+        "--source-lang",
+        default=None,
+        help=(
+            "Two-letter source code for ASR. Defaults to asr.language in the "
+            "config, which is 'en'. Set it to transcribe a source that is not "
+            "English; --source-lang hi --target-lang hi is the cloning leg, "
+            "and skips translation."
+        ),
+    )
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument(
         "--artifacts-root",
@@ -114,6 +124,14 @@ def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
     cfg = load_config(args.config)
+
+    if args.source_lang:
+        # ASR's language is config, not a per-run argument, because every run
+        # so far has been English. A Hindi source needs it per run, and a
+        # wrong value here does not raise — Whisper transcribes Hindi speech
+        # into confident English words.
+        cfg.setdefault("asr", {})["language"] = args.source_lang
+
     paths = JobPaths(args.job_id, root=Path(args.artifacts_root)).ensure()
 
     duration_model = None
