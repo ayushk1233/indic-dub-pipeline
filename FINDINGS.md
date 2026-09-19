@@ -20,7 +20,7 @@ Settled 2026-09-17.
 |---|---|
 | model | **IndicF5** (MIT) |
 | reference clip | 10 s, **English**, under the 15 s internal clipping threshold |
-| reference transcript | **lowercased, punctuation stripped** |
+| reference transcript | **lowercased, punctuation stripped** — and see §16e, which says it should also be in Devanagari |
 | duration | set from the target slot, **not** from the byte ratio |
 | chunking | single chunk |
 | identity | 0.768 — **93% of the calibrated scale** |
@@ -30,8 +30,15 @@ Settled 2026-09-17.
 Against the Hindi-reference control at 0.785 and 86%, that is a difference of −0.017 at 0.7
 standard errors: indistinguishable. Both were judged good by ear.
 
-**What this buys.** No per-speaker Hindi recording session. No transliteration dependency. No
-licence dead end. The reference is an English clip, which is what production supplies anyway.
+**What this buys.** No per-speaker Hindi recording session. No licence dead end. The reference is
+an English clip, which is what production supplies anyway.
+
+**The one amendment since.** This row was written when a Latin reference transcript looked free.
+§16e measured what it costs: an intermittent leading prefix on 4 of 24 clips, and a 1.4 s row at
+0.250 that a Devanagari transcript reads cleanly at 0.062. Writing the reference transcript in
+Devanagari is strictly better on every number measured. It is not yet in the shipping row because
+doing it for an arbitrary speaker needs automatic transliteration (§4f), which is the same
+dependency §5c was pleased to have avoided — that relief was premature.
 
 **Do not** use XTTS-v2 (see §8), do not ask IndicF5 for English output (§3), do not hand it a
 reference over 15 s (§4d), and do not quote the 92% that the pre-fix `en_ref_10s` arm scored —
@@ -620,6 +627,13 @@ leaving reference speech in front of it. Transliterating the reference transcrip
 `ref_audio_len` slice, same missing alignment check, opposite symptom — which means "the model
 cannot place this text" covers both, and punctuation was one instance of it rather than the whole.
 
+**Closed by §16e.** Punctuation was one instance; the general one is the **script boundary**
+between `ref_text` and `gen_text`. Normalising punctuation took the prefix from 1 of 7 to 0 of 7
+on the English route; it did not remove it from `en -> hi`, where §16b still found 4 of 24 with
+punctuation already stripped. Writing the reference transcript in Devanagari took that to 0 of
+24 on both seeds. One reference transcript, in the same script as the text being generated, fixes
+every version of this that has been observed.
+
 ### 5d. Reference truncation over 15 s — still open
 
 `preprocess_ref_audio_text` clips audio over 15 s and **never truncates `ref_text` to match**, so
@@ -928,6 +942,7 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | `fresh()` is the safe way to pick up a pull in a live kernel | Only for modules it purges. It does not purge `f5_tts`, so the instrumentation installed there kept reading the previous module instance's `_mode` — 24 clips at a frozen 3.82 s, `_calls` empty, nothing raised (§13a). |
 | The residual prefix is specific to the English route | Sharper than that: it belongs to the English **reference**. Every clip in §16 generates Hindi and `en_ref` still produced four leading prefixes, one of them the literal English word *question*. `hi_ref` produced none in 24. It is a cross-script reference artifact, it is seed-dependent, and it is in the shipping configuration (§16b). |
 | `en -> hi` and `hi -> hi` differ, so the reference language matters | Only at the ends of the ladder. Between 2.7s and 19.7s the two arms sit at 0.049 and 0.047. The whole 0.026 headline gap is the 1.4s row and the 21.2s row (§16). |
+| The ladder breaks at both ends, and both ends are the model's limits | One end was the harness. Rewriting the reference transcript in Devanagari took the 1.4s row from 0.250 to 0.062 — down to a nukta — and removed every leading prefix. The 21.2s end did not move. Short was a cross-script reference artifact; long is a real length limit (§16e). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
@@ -1074,6 +1089,10 @@ Devanagari characters.** 19.7 s / 240 characters is clean on both arms.
 clean either. A 1.4 s slot is inside the range real dubbing segments live in, which makes this
 the more expensive of the two ends.
 
+**Superseded for the short end — §16e.** It was not a length problem. With the reference
+transcript written in Devanagari the same 1.4 s row scores 0.062 on both seeds, and the whole
+error is a nukta. The long end below is unaffected and still stands.
+
 ### 16b. The residual prefix belongs to the English *reference*, not to English generation
 
 §15 recorded `lead` at 0.000 across 28 Hindi rows and concluded the residual prefix (§5c) was
@@ -1104,7 +1123,7 @@ Two consequences:
 
 `fixtures/xlit/reference_deva.json` already holds the English reference transcript in
 Devanagari, reviewed, and §4d showed that transliterating it fixed the English route outright.
-Whether it also removes this prefix is 24 clips and has not been run.
+**It removes this prefix as well, completely — §16e.**
 
 ### 16c. A constant duration offset that differs by reference
 
@@ -1132,15 +1151,86 @@ One thing the ruler cannot settle without a floor: `ष` comes back as `श` thr
 or Whisper, and this script has no recording to tell them apart. A proper noun is the case where
 it matters most.
 
+### 16e. The prefix is gone: a Devanagari reference transcript removes it completely
+
+The shipping `en -> hi` arm run again with **one thing changed** — the reference *transcript*
+rewritten in Devanagari (`fixtures/xlit/reference_deva.json`). Same reference wav
+(`english_reference_short.wav`, 10.5 s), same twelve ladder sentences, same two seeds, same
+`fix_duration`. The audio the model clones from is byte-identical; only the text beside it
+changed script.
+
+| arm | reference transcript | n | cer | clips with a leading prefix |
+|---|---|---|---|---|
+| `en_ref` | Latin | 24 | 0.080 | **4** — all seed 1, lead 0.051–0.078 |
+| `hi_ref` | Devanagari (Hindi) | 24 | 0.054 | 0 |
+| **`en_ref_deva`** | **Devanagari (English)** | 24 | **0.052** | **0** |
+
+Zero on both seeds, `lead` 0.000 on all 24 rows. The English reference now scores where the
+Hindi reference scores — 0.052 against 0.054 — and this run's seed spread is 0.006, so the 0.028
+it moved is about five times the noise. The control ran **hotter** this session (0.068 against
+§15's 0.055, +0.013 drift), which makes that comparison conservative rather than flattering.
+
+**Why it works.** §5a: the model is conditioned on one token sequence, `ref_text + gen_text`,
+against one mel span, `ref_mel + the span to generate`. With a Latin transcript in front of
+Devanagari text the handoff between the two falls on a script boundary — and §5's
+`ref_audio_len` slice is unanchored, so nothing forces the generated span to begin where the
+reference ends. The model finishes the Latin tokens and emits reference-flavoured material
+before it commits to the target, which is why one of §16b's four prefixes was the literal
+English word *question*. Written in Devanagari, reference and target are one continuous script
+and there is no boundary to stumble over.
+
+The byte arithmetic points the same way, and is worth recording because it is free to check:
+
+| reference transcript | chars | bytes | bytes/s over 10.5 s | implied cps at 2.6 bytes/char |
+|---|---|---|---|---|
+| Latin | 135 | 135 | 12.86 | 4.95 |
+| Devanagari | 127 | 333 | 31.71 | **12.20** |
+
+The measured Hindi rate for this speaker is 12.19 cps. A Devanagari reference transcript makes
+§5a's byte-ratio duration estimate **exactly right**; the Latin one under-estimates the rate by
+2.46x, which is the same over-allocation that produced §5's gibberish.
+
+**Two other things moved, and one did not.**
+
+- **The short end is fixed.** §16a called 1.4 s "worse than long": `en_ref` scored 0.250 there
+  and produced `या वाज मेरिये` for `यह आवाज़ मेरी है।`. `en_ref_deva` scores **0.062 on both
+  seeds**, and the entire error is the nukta and the danda — `आवाज` heard for `आवाज़`. That is a
+  clean read of a 17-character sentence. It matters more than the long end does: real pipeline
+  segments have a median of 2.76 s.
+- **The middle improved too**, 0.035 across ids 1–10 against 0.049 / 0.047 for the two earlier
+  arms. Small, in the same direction, and measured in a session that was scoring higher on the
+  control.
+- **The 21.2 s break did not move.** 0.213 here against `en_ref` 0.239 and `hi_ref` 0.105, and
+  seed 1 repeats mid-sentence exactly as before — `सैकड़ों वीडियो पर **सैकड़ों पर** यह तरीका`.
+  So §16a's long-form cap and §16b's prefix are **two separate faults**: one is a cross-script
+  reference artifact and is now fixed, the other is a length limit and is untouched by any of
+  this. The ~20 s / ~240-character cap stands unchanged.
+
+**What this run does not measure.** `fix_duration` forces the span, so `got/askd` is 1.00 on
+every row by construction. It therefore says nothing about the 2.46x over-allocation on the
+**default** long-form path, where F5-TTS's own chunker derives `max_chars` from that same byte
+ratio. That half of the §16b question is still open.
+
+**The action is one line, and its obstacle is not new.** The shipping `en -> hi` configuration
+should pass its reference transcript in Devanagari. It costs nothing at inference, needs no
+retraining, and removes an intermittent failure from the product's main path. What stands in the
+way is §4f: `reference_deva.json` was written by hand for one speaker. Doing this for an
+arbitrary user's reference clip needs English-to-Devanagari transliteration in the pipeline —
+the same blocker §4f already names, now with a second reason to pay for it.
+
 ## 17. Open
 
 - **§16c**, the constant +0.2 s on `hi_ref` and 0.00 on `en_ref`. Check `requested_s` and
   `ref_s` against the 10.5 s clips before treating it as a model property.
-- **§16b**, whether a Devanagari reference transcript removes the prefix from `en -> hi` the
-  way §4d showed it did for the English route. `fixtures/xlit/reference_deva.json` exists and
-  is reviewed; the arm is 24 clips and has not been run.
+- **§16e**, whether the Devanagari reference transcript also fixes duration allocation on the
+  **default** long-form path. The arithmetic says it should — 12.20 implied cps against 12.19
+  measured — but every run so far passes `fix_duration`, which forces the span and hides it.
+  Needs one arm with `fix_duration=None` and the chunker left alone.
+- **§16e**, automatic English-to-Devanagari transliteration of a reference transcript. It is now
+  the blocker for two separate wins, not one (§4f).
 - **§16a**, whether the break past 20 s is seconds or characters. `fix_duration` forces one
-  chunk, so the two are confounded in every run this project can currently do.
+  chunk, so the two are confounded in every run this project can currently do. §16e rules out
+  the reference script as the cause.
 - **Wire IndicF5 in as a pipeline TTS backend.** Needs `reference_text` on `SynthesisSegment`, a
   bundle version bump, the transcript normaliser applied to the reference, and `fix_duration` from
   each segment's real slot.
