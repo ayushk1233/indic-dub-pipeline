@@ -392,6 +392,8 @@ def rescore():
     is wrong for a reason that has nothing to do with the audio. Re-synthesis
     is the expensive half and the audio was never the problem.
     """
+    _lines.clear()
+
     rows = []
     if ROWS.exists():
         for entry in json.loads(ROWS.read_text(encoding="utf-8")):
@@ -408,7 +410,6 @@ def rescore():
         p(f"!! no clips under {OUT}")
         return []
 
-    _lines.clear()
     rows = floor_rows() + rows
     transcribe_outputs(rows)
     return report_rows(rows)
