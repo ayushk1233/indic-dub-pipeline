@@ -76,13 +76,32 @@ LADDER = FIXTURES / "sentences" / "tts_ladder_hi.json"
 CONTROL = FIXTURES / "sentences" / "fixture7_hi.json"
 CONTROL_SLOTS = FIXTURES / "hi_speaker" / "slots.json"
 
-# (arm, reference file, reference transcript key)
+# arm -> (reference file, reference transcript key). The key `deva` is not a
+# key in reference_text.json; it means fixtures/xlit/reference_deva.json, the
+# English reference transcript written in Devanagari and reviewed by the
+# speaker.
 ARMS = {
     "hi_ref": ("hindi_reference_short.wav", "hindi_short"),
     "en_ref": ("english_reference_short.wav", "english_short"),
+    # §16b: every leading prefix in the ladder run was en_ref, four clips in
+    # twenty-four, all on one seed, one of them the literal English word
+    # `question` in front of a Hindi sentence. The mechanism named there is a
+    # reference whose audio and transcript are English while the generated text
+    # is Devanagari — nothing forces the unanchored ref_audio_len slice into
+    # alignment across scripts. §4d showed that transliterating this exact
+    # transcript fixed the English route outright. This arm is that same change
+    # applied to the shipping en -> hi path, and it is the one arm that could
+    # remove a defect from the product's main route.
+    #
+    # Read against en_ref ON THE SAME SEEDS. The prefix appears on some seeds
+    # and not others, so an unpaired comparison cannot see it go away.
+    "en_ref_deva": ("english_reference_short.wav", "deva"),
 }
 DEFAULT_ARMS = ("hi_ref", "en_ref")
+PREFIX_ARMS = ("en_ref", "en_ref_deva")
 SEEDS = (0, 1)
+
+REFERENCE_DEVA = FIXTURES / "xlit" / "reference_deva.json"
 
 # What §15 measured on the control block, with the same model, reference and
 # settings. The control is here to say whether this session is that session.
@@ -212,11 +231,20 @@ def main(arms=DEFAULT_ARMS, seeds=SEEDS, control=True):
     for arm in arms:
         filename, key = ARMS[arm]
         path = FIXTURES / filename
-        text = plain(transcripts[key]["text"])
+        if key == "deva":
+            deva = json.loads(REFERENCE_DEVA.read_text(encoding="utf-8"))
+            if not deva.get("reviewed"):
+                p(f"  !! {REFERENCE_DEVA.name} is not reviewed — {arm} not run")
+                continue
+            text, language = plain(deva["devanagari"]), "hi (transliterated en)"
+        else:
+            text, language = plain(transcripts[key]["text"]), transcripts[key]["language"]
         references[arm] = (path, sf.info(str(path)).duration, text)
-        p(f"  {arm:<8}  {filename}  {references[arm][1]:.2f}s")
-        p(f"            {len(text)} chars, {len(text.encode('utf-8'))} bytes, "
-          f"{transcripts[key]['language']}")
+        p(f"  {arm:<12}  {filename}  {references[arm][1]:.2f}s")
+        p(f"                {len(text)} chars, {len(text.encode('utf-8'))} bytes, "
+          f"{language}")
+        p(f"                {text[:72]}")
+    arms = [a for a in arms if a in references]
     p("")
     p(f"  seeds     {tuple(seeds)}")
     p(f"  ladder    {len(ladder)} sentences, "
@@ -487,6 +515,30 @@ def report_rows(rows):
         p(f"  seed spread across the whole ladder  "
           f"{max(per_seed) - min(per_seed):.3f}")
         p("  An arm difference smaller than that is not a difference.")
+
+    section("LEADING PREFIX — invented speech before the sentence begins")
+    p("  §16b: every prefix in the first ladder run was en_ref, four clips in")
+    p("  twenty-four, all on one seed, one of them the English word `question`")
+    p("  in front of a Hindi sentence. It is in the shipping configuration and")
+    p("  it is seed-dependent, so it must be read per seed and not pooled.")
+    p("")
+    p(f"{'arm':<14}{'seed':>5}{'n':>4}{'with a prefix':>15}{'mean lead':>11}"
+      f"{'worst':>8}")
+    p("")
+    for arm in sorted({r["arm"] for r in ladder}):
+        for seed in sorted({r["seed"] for r in ladder if r["arm"] == arm}):
+            group = [r for r in ladder if r["arm"] == arm and r["seed"] == seed]
+            hit = [r for r in group if r.get("lead", 0) > 0]
+            worst = max((r.get("lead", 0) for r in group), default=0.0)
+            p(f"{arm:<14}{seed:>5}{len(group):>4}{len(hit):>15}"
+              f"{fmt(mean(group, 'lead'), 11)}{worst:>8.3f}")
+    prefixed = [r for r in ladder if r.get("lead", 0) > MAX_LEAD]
+    if prefixed:
+        p("")
+        p("  over the threshold, with what the model said first:")
+        for row in prefixed:
+            p(f"     {row['label']:<22}[{row['index']:>2}] lead {row['lead']:.3f}  "
+              f"{(row.get('heard') or '')[:56]}")
 
     section("PER CLIP")
     p(f"{'label':<22}{'id':>3}{'targ':>6}{'got':>6}{'cer':>7}{'extra':>7}"

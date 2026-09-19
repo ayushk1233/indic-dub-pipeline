@@ -163,3 +163,61 @@ def test_a_failed_synthesis_still_produces_a_row():
     # and it has to survive being written out, or a container replacement
     # turns the run's most interesting row into a clip that merely went missing
     assert "synthesis_error" in probe.SAVED
+
+
+# ------------------------------------------------ the en_ref_deva arm (§16b)
+
+
+def test_the_deva_arm_changes_the_transcript_and_not_the_audio():
+    """
+    §16b's whole claim rests on this being a one-variable change. If the arm
+    also moved the reference clip it would be measuring two things, and §4d —
+    which is the precedent it leans on — was a one-variable change too.
+    """
+    probe = pytest.importorskip("colab.indicf5_tts_probe")
+
+    assert probe.ARMS["en_ref_deva"][0] == probe.ARMS["en_ref"][0]
+    assert probe.ARMS["en_ref_deva"][1] != probe.ARMS["en_ref"][1]
+
+
+def test_the_deva_reference_says_the_same_words_as_the_latin_one():
+    """
+    The transliterated transcript has to be the English transcript, in the
+    other script. A different reading of the same audio would be a second
+    variable hiding inside the first.
+    """
+    probe = pytest.importorskip("colab.indicf5_tts_probe")
+
+    deva = json.loads(probe.REFERENCE_DEVA.read_text(encoding="utf-8"))
+    latin = json.loads(
+        Path("fixtures/reference_text.json").read_text(encoding="utf-8"))
+    assert deva["reference_file"] == probe.ARMS["en_ref"][0]
+    assert deva["reference_key"] == probe.ARMS["en_ref"][1]
+    assert len(deva["alignment"]) == len(deva["latin"].split())
+    assert deva["latin"].split()[:6] == latin["english_short"]["text"].lower().split()[:6]
+
+
+def test_the_deva_arm_is_not_run_by_default():
+    """
+    It is a paired follow-up to a run that already happened, not part of the
+    ladder. Running it by default would re-spend 48 clips to re-measure two
+    arms that are already recorded in §16.
+    """
+    probe = pytest.importorskip("colab.indicf5_tts_probe")
+
+    assert "en_ref_deva" not in probe.DEFAULT_ARMS
+    assert set(probe.PREFIX_ARMS) == {"en_ref", "en_ref_deva"}
+
+
+def test_an_unreviewed_deva_reference_drops_the_arm_rather_than_using_it():
+    """
+    A transliterated transcript nobody checked would be read aloud by the
+    model as the conditioning for every clip in the arm.
+    """
+    probe = pytest.importorskip("colab.indicf5_tts_probe")
+
+    source = Path("colab/indicf5_tts_probe.py").read_text(encoding="utf-8")
+    guard = source[source.index('if key == "deva":'):]
+    assert 'not deva.get("reviewed")' in guard[:400]
+    assert "continue" in guard[:500]
+    assert "arms = [a for a in arms if a in references]" in source

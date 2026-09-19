@@ -870,6 +870,8 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | `hi -> hi` is already good | It is — but nobody had measured it. §7's 0.719 is XTTS-v2 on a different scale, and no IndicF5 number for the Hindi leg existed until §15. Two of the product's four legs were being carried on an inference from the third. |
 | A 0.9 script gate protects a Hindi content number | It excluded five clips that had said the right words, because Hindi writes English loanwords in Devanagari and Whisper writes them in either script. All five fell on the two loanword-heavy sentences, so the exclusions were not random: the arm's mean improved by losing its hardest clips and the only clip over `MAX_CER` (§15a). |
 | `floor_rows()` makes a CER impossible to read against zero | Only if the clips are on the host. `.gitignore` un-ignores `fixtures/en_speaker/*.wav` by name, so `slots.json` reached Kaggle and the seven Hindi clips did not; the function returned an empty list and the report printed a verdict under `floor (him) cer -`. A guard that fails open is not a guard (§15a). |
+| The residual prefix is specific to the English route | Sharper than that: it belongs to the English **reference**. Every clip in §16 generates Hindi and `en_ref` still produced four leading prefixes, one of them the literal English word *question*. `hi_ref` produced none in 24. It is a cross-script reference artifact, it is seed-dependent, and it is in the shipping configuration (§16b). |
+| `en -> hi` and `hi -> hi` differ, so the reference language matters | Only at the ends of the ladder. Between 2.7s and 19.7s the two arms sit at 0.049 and 0.047. The whole 0.026 headline gap is the 1.4s row and the 21.2s row (§16). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
@@ -970,8 +972,119 @@ better.
   load to occur in the fixtures — the guard that stops a collision table becoming a
   transliterator. Sentence 5 went 0.364 / 0.227 / 0.273 to 0.182 / 0.045 / 0.091.
 
-## 16. Open
+## 16. The duration ladder: both ends are hard, and the middle does not care which reference
 
+Twelve new Hindi sentences, 1.4 s to 21.3 s, asked at a constant 12.19 characters per second so
+duration varies and pace does not. Two arms generating the same Hindi and differing only in the
+reference: `hi_ref` (§15's configuration) and `en_ref` (the **shipping** `en -> hi`, §1). Two
+seeds each, plus a seven-clip fixture7_hi control that came back at 0.068 against §15's 0.055 —
+inside one seed's spread, so the run is comparable.
+
+| arm | n | cer | extra | missing | lead | bad |
+|---|---|---|---|---|---|---|
+| `en_ref` | 24 | 0.080 | 0.025 | 0.033 | **0.011** | **5** |
+| `hi_ref` | 24 | 0.054 | 0.014 | 0.021 | **0.000** | **0** |
+
+Seed spread across the whole ladder 0.001, so the 0.026 gap is 26x the noise. **And almost none
+of it is what it looks like.**
+
+| id | target | en_ref | hi_ref | gap |
+|---|---|---|---|---|
+| 0 | 1.4 s | 0.250 | 0.093 | **+0.157** |
+| 1–10 | 2.7–19.7 s | 0.049 | 0.047 | **+0.002** |
+| 11 | 21.2 s | 0.239 | 0.105 | **+0.134** |
+
+**Between 2.7 s and 19.7 s the reference language does not matter at all.** The entire arm
+difference is the two ends of the ladder. That is §7's result a second time, on a second model,
+by a second route: what predicts the outcome is the thing being generated, not the thing being
+cloned from.
+
+### 16a. Where the ladder breaks, at both ends
+
+**Long: between 19.7 s and 21.2 s.** 19.7 s is 0.079 / 0.044; 21.2 s is 0.239 / 0.105. Both
+arms, both seeds. The failure is at the end of the clip and the speaker heard it as such — the
+transcripts run on past the sentence (`चाहे वो बता न पाए कि क्या **न न**`, `कि क्या **तक शक
+को**`) and one repeats mid-sentence (`हमने सेकड़ों **में** वीडियो पर **ये सेकों** ये तरीका`).
+
+**This is confounded with chunk length by construction and cannot be separated here.**
+`fix_duration` requires `one_chunk=True` (§5a), so the 21.2 s row is one 259-character chunk on
+top of a 10.5 s reference — about 31 s of total mel, more than F5-TTS's own chunker would ever
+hand the sampler in one call. Whether the limit is seconds or characters is not answerable from
+this run. What is usable either way: **cap a single-chunk generation at about 20 s, or about 240
+Devanagari characters.** 19.7 s / 240 characters is clean on both arms.
+
+**Short: 1.4 s, and it is worse than long.** `en_ref`/s0 produced `या वाज मेरिये` for `यह आवाज़
+मेरी है।` — CER 0.438, the worst clip in the run. `hi_ref` is better at 0.125 / 0.062 but not
+clean either. A 1.4 s slot is inside the range real dubbing segments live in, which makes this
+the more expensive of the two ends.
+
+### 16b. The residual prefix belongs to the English *reference*, not to English generation
+
+§15 recorded `lead` at 0.000 across 28 Hindi rows and concluded the residual prefix (§5c) was
+"specific to the English route". That is true and it is not precise enough. Here every clip
+generates Hindi, and the prefix comes back:
+
+| | clips with a leading prefix |
+|---|---|
+| `en_ref` seed 0 | 0 of 12 |
+| **`en_ref` seed 1** | **4 of 12** — lead 0.051 to 0.078 |
+| `hi_ref` seed 0 | 0 of 12 |
+| `hi_ref` seed 1 | 0 of 12 |
+
+`एक एरसे किसी भी वीडियो...`, `के वस एक अगर अनुवाद...`, `एक अर्सजेंग जब मैंने...`, and — the one
+that names the mechanism — **`एक question हिंदी को कहने में...`**, where the model emitted the
+English word *question* before a Hindi sentence.
+
+So the prefix is not about the generated language. It is what happens when the reference audio
+and transcript are English and the generated text is Devanagari: the unanchored `ref_audio_len`
+slice (§5) leaves reference material in, and across scripts nothing forces it into alignment.
+
+Two consequences:
+
+- **It is in the shipping configuration.** `en -> hi` is the product's main path — a user
+  uploads an English video — and this is the only arm that has it.
+- **It is seed-dependent**, so it will not reproduce on demand and will appear intermittently
+  in production. Four clips in twenty-four, all on one seed.
+
+`fixtures/xlit/reference_deva.json` already holds the English reference transcript in
+Devanagari, reviewed, and §4d showed that transliterating it fixed the English route outright.
+Whether it also removes this prefix is 24 clips and has not been run.
+
+### 16c. A constant duration offset that differs by reference
+
+`hi_ref` came back **+0.2 s on 11 of 12 rows** — 1.6 s for 1.4 s, 5.2 s for 5.0 s, 10.6 s for
+10.4 s, 21.4 s for 21.2 s. `en_ref` came back at the requested duration on all 12, to the
+printed precision. Both reference clips are 10.5000 s at 24 kHz, so it is not their length.
+
+A constant is not noise. It is the same shape as §5c — `ref_audio_len` frames stripped with no
+alignment check — and it means the reference length `fix_duration` is computed from is not the
+one the model actually used, for one of the two clips. For dubbing that is 0.2 s of drift per
+segment on the arm that has it, which assembly then has to absorb. **Open**; the run's
+`fix_duration` section was not read, and the first thing to check is whether `requested_s` and
+`ref_s` agree with 10.5 s on both arms.
+
+### 16d. What the ladder says about identity, which is nothing, and what the ear says
+
+Nothing in this run measures identity. The speaker listened to all 48 ladder clips and reported
+that every one clones the voice, on **both** arms — *"nobody can differentiate"*. That is one
+listener on his own voice rather than §3e's panel, but it is the third time ear and ruler have
+agreed here, and it is consistent with §7: identity survives the foreign reference, and what
+moves is content at the extremes.
+
+One thing the ruler cannot settle without a floor: `ष` comes back as `श` throughout — `भाशा`,
+`विश्यों`, `प्रतीशत`, and the speaker's own name as `आयुश` for `आयुष`. That is either the model
+or Whisper, and this script has no recording to tell them apart. A proper noun is the case where
+it matters most.
+
+## 17. Open
+
+- **§16c**, the constant +0.2 s on `hi_ref` and 0.00 on `en_ref`. Check `requested_s` and
+  `ref_s` against the 10.5 s clips before treating it as a model property.
+- **§16b**, whether a Devanagari reference transcript removes the prefix from `en -> hi` the
+  way §4d showed it did for the English route. `fixtures/xlit/reference_deva.json` exists and
+  is reviewed; the arm is 24 clips and has not been run.
+- **§16a**, whether the break past 20 s is seconds or characters. `fix_duration` forces one
+  chunk, so the two are confounded in every run this project can currently do.
 - **Wire IndicF5 in as a pipeline TTS backend.** Needs `reference_text` on `SynthesisSegment`, a
   bundle version bump, the transcript normaliser applied to the reference, and `fix_duration` from
   each segment's real slot.
