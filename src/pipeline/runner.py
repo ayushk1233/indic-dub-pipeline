@@ -109,10 +109,17 @@ class PipelineRunner:
     def preprocess(self, input_path: str) -> StageResult:
         from src.stages.preprocess import FFmpegPreprocessStage
 
+        # Tell the stage where this job's artifacts live. Without it the
+        # stage writes to ./artifacts regardless of --artifacts-root.
+        cfg = {**self.cfg, "artifacts": {
+            **(self.cfg.get("artifacts") or {}),
+            "root": str(self.paths.root),
+        }}
+
         return FFmpegPreprocessStage().run(
             input_path,
             self.paths.job_id,
-            self.cfg,
+            cfg,
         )
 
     def transcribe(self) -> StageResult:

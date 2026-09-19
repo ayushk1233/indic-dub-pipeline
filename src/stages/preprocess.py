@@ -38,7 +38,13 @@ class FFmpegPreprocessStage(PipelineStage):
                 error="Input validation failed.",
             )
 
-        output_dir = Path("artifacts") / job_id
+        # The stage contract is run(input_path, job_id, cfg), so the artifact
+        # root has to arrive through cfg. It was hardcoded here, which meant
+        # --artifacts-root silently did nothing for this stage — JobPaths
+        # honoured it and preprocessing wrote to ./artifacts anyway — and the
+        # suite dropped real job directories into the repo on every run.
+        root = Path((cfg.get("artifacts") or {}).get("root") or "artifacts")
+        output_dir = root / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
 
         start = time.perf_counter()
