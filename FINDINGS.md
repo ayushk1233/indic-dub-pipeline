@@ -867,6 +867,9 @@ Kept because a later session finding these cited elsewhere needs to know they do
 | The accent metric is the blocking piece of work | It is blocking an *accent* claim, and accent was then demoted to "80% is fine". What actually blocks both shipping and the generalisation test is the automatic transliterator, because `deva_ref` needs a Devanagari reference transcript that exists for one speaker and was made by hand (§4f). |
 | Phase 0 measured whether the route works | It measured whether the route works **for this speaker, on seven scripted sentences, from one 10 s studio reference**. Nothing in it has been run on a second voice (§4f). |
 | `deva_ref`/s2 sounded closest to him, so accent varies by seed and cannot be selected on CER | Misread. His s2 remark was about content, and going through the clips he reported the accent the same across all three seeds. He picked s1, which is also the lowest-CER seed — the detectors rank content correctly, which is their job (§4e). |
+| `hi -> hi` is already good | It is — but nobody had measured it. §7's 0.719 is XTTS-v2 on a different scale, and no IndicF5 number for the Hindi leg existed until §15. Two of the product's four legs were being carried on an inference from the third. |
+| A 0.9 script gate protects a Hindi content number | It excluded five clips that had said the right words, because Hindi writes English loanwords in Devanagari and Whisper writes them in either script. All five fell on the two loanword-heavy sentences, so the exclusions were not random: the arm's mean improved by losing its hardest clips and the only clip over `MAX_CER` (§15a). |
+| `floor_rows()` makes a CER impossible to read against zero | Only if the clips are on the host. `.gitignore` un-ignores `fixtures/en_speaker/*.wav` by name, so `slots.json` reached Kaggle and the seven Hindi clips did not; the function returned an empty list and the report printed a verdict under `floor (him) cer -`. A guard that fails open is not a guard (§15a). |
 
 Two of these were caught by ear rather than by any metric, and one of them — *"for every
 en_ref_25s audio there is gibberish in between"* — is what started the investigation that produced
@@ -874,7 +877,100 @@ en_ref_25s audio there is gibberish in between"* — is what started the investi
 
 ---
 
-## 15. Open
+## 15. hi -> hi sits at the human floor, and the English route is the whole problem
+
+`en -> hi` was measured at 93% of scale (§1). `hi -> hi` was not measured at all — §7's 0.719
+is **XTTS-v2**, on a different model, a different encoder and a different scale. Two of the four
+legs the product ships were carried on an inference from the third. This is the first IndicF5
+number for the Hindi leg.
+
+21 clips, three seeds, `hindi_reference_short.wav` (10 s), `fix_duration = ref + slot` from his
+own sliced timings, plus his seven real recordings scored through the identical path as the
+`floor` arm.
+
+| label | n | cer | extra | missing | lead | bad |
+|---|---|---|---|---|---|---|
+| floor (him) | 7 | 0.084 | 0.006 | 0.055 | 0.000 | 0 |
+| hi/s0 | 7 | 0.068 | 0.039 | 0.014 | 0.000 | 0 |
+| hi/s1 | 7 | 0.045 | 0.012 | 0.018 | 0.000 | 0 |
+| hi/s2 | 7 | 0.051 | 0.009 | 0.025 | 0.000 | 0 |
+| **hi (all)** | **21** | **0.055** | 0.020 | 0.019 | 0.000 | **0** |
+
+Seed spread 0.024. Pace 1.03x his own slot against the floor's 1.00.
+
+**Do not read the -0.030 gap as the model beating the human.** Two things make it, and the
+honest number is smaller than the headline:
+
+- **Leakage.** Sentences 0 and 1 fall inside the reference clip, so the model was handed that
+  audio and its transcript. The floor barely notices the boundary — 0.088 inside against 0.083
+  outside — and the synthesis notices it a lot: **0.024 inside against 0.067 outside**. The
+  floor is the control that makes that attributable: the sentences are not intrinsically
+  easier, they are easier *for the model*. Leakage is worth about 0.043 CER here.
+- **One bad floor clip.** Whisper dropped words off the end of his sentence 0 and scored it
+  0.145, all deletions, against the synthesis's 0.018 on all three seeds. Without that clip the
+  floor is 0.074.
+
+Outside the reference clip the gap is **-0.015 against a seed spread of 0.024**, which is to
+say: on sentences the model was not shown, IndicF5's Hindi and the speaker's own Hindi are
+indistinguishable through this ruler. That is the finding. It is a ceiling on what the ruler
+can say, not a claim about the model, and §3b applies — a CER at or below the floor is the
+shape §4e's refuted arms also had.
+
+**The two failure modes are opposites, and that is the fluency prior again (§3b).**
+
+- The floor's error is **deletion**: 0.055 missing against 0.006 extra. Whisper loses words off
+  natural connected speech — `असल में करता` for `असल में क्या करता है`, `वाकि` for `वाक्य`,
+  `नाममकिन` for `नामुमकिन`, `जादा` for `ज़्यादा`.
+- The synthesis's error is **insertion**: 0.020 extra against 0.019 missing, and every large
+  one is a short invented word — a spurious `है` closing sentence 5, an inserted `इस` in
+  sentence 4.
+
+Synthesised speech sits closer to the read-aloud distribution Whisper was trained on than a
+person talking does. §4e measured the same asymmetry and it was what a *worse* accent looked
+like there; here it lines up with the speaker's own judgement, who listened to all 21 clips and
+reported that every one sounds like his reference. That is one listener on his own voice and
+not §3e's panel, but the ear and the ruler agree, which is the second time in this project they
+have (§4d).
+
+**`lead` is 0.000 on all 28 rows.** The residual prefix — invented speech before the sentence
+begins, §5c's defect, still live on the English route's short slots as late as §4e — never
+fires in Hindi, including on a 1.94 s slot. The prefix is not a general property of IndicF5's
+unanchored `ref_audio_len` slice; it is specific to the English route.
+
+**What this settles, and what it does not.** The premise the fine-tuning plan rests on is now
+measured rather than assumed: the Hindi half of the product works, and English is the entire
+problem. It does **not** settle identity — nothing in this run measures it, for the reason in
+§2 and because the calibrated scale currently needs a loaded XTTS. And `hi -> en` remains
+untouched.
+
+### 15a. Two ruler bugs, both of which flattered the arm
+
+The first run of this probe reported cer 0.051 over 16 clips, seed spread 0.015, zero bad
+clips, and no floor at all. Every one of those numbers was wrong in the direction that looks
+better.
+
+- **The floor never left the laptop.** `.gitignore` ignores `*.wav` and un-ignores
+  `fixtures/en_speaker/*.wav` **by name**. `slots.json` is not audio, so it reached Kaggle and
+  the seven Hindi clips did not. `floor_rows()` found the directory, found no clips, returned
+  an empty list, and the report printed `floor (him) cer -` with a verdict underneath. A
+  synthesis CER read against zero is the one thing the probe exists to prevent, and nothing
+  raised. The probe now refuses before loading the model.
+- **The script gate excluded five correct clips.** It was set at 0.9 Devanagari to catch a
+  Hindi clip decoded into Latin. But Hindi writes English loanwords in Devanagari and Whisper
+  writes them in either script, so `इकतीस बिल्कुल फ़िट हुए।` heard as `31 बिलकुल fit हुए` is
+  67% Devanagari and correct. All five exclusions fell on the two loanword-heavy sentences, so
+  they were not random — the arm improved by losing its hardest clips, and the excluded set
+  contained the only clip over `MAX_CER`. The gate is two thresholds now (0.5 excludes, 0.9
+  reports) and the fraction is measured after the loanword table has folded what the corpus
+  accounts for. In the corrected run six transcripts came back script-mixed **including one
+  floor clip**, which is the check that the fold is not a special favour to the synthesis.
+- The underlying scoring error is the same one §4c already paid for with numbers: `फ़िट`
+  against `fit` shares no characters, exactly as `Thirty-one` against `31` does.
+  `src/text/loanwords.py` folds it, for Hindi only, and every Devanagari value is checked at
+  load to occur in the fixtures — the guard that stops a collision table becoming a
+  transliterator. Sentence 5 went 0.364 / 0.227 / 0.273 to 0.182 / 0.045 / 0.091.
+
+## 16. Open
 
 - **Wire IndicF5 in as a pipeline TTS backend.** Needs `reference_text` on `SynthesisSegment`, a
   bundle version bump, the transcript normaliser applied to the reference, and `fix_duration` from
