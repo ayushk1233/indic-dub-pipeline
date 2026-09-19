@@ -33,6 +33,7 @@ against its own noise instead of eyeballed.
 import inspect
 import json
 import re
+import unicodedata
 import time
 from pathlib import Path
 
@@ -42,7 +43,7 @@ import torch
 
 from colab import workspace
 from colab.english_report import cosine
-from src.text.numbers import spell_numbers
+from src.text.numbers import script_language, spell_numbers
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -169,7 +170,7 @@ def sentences(text, minimum=25):
 _PUNCT = re.compile(r"[.,!?;:\u0964\u0965\"'()\[\]{}—–-]")
 
 
-def normalize(text):
+def normalize(text, language=None):
     """
     Strip what a transcript comparison should not be graded on.
 
@@ -184,7 +185,12 @@ def normalize(text):
     wrong was `feet` for `fit`. Four of the seven probe sentences contain a
     number, so this was a large part of an arm's headline score.
     """
-    text = spell_numbers(text or "")
+    # NFC before anything else. The nukta consonants are stored either
+    # precomposed (फ़, U+095E) or decomposed (फ + U+093C) depending on what
+    # produced the string, and the two are the same word and different
+    # characters. Whisper and the fixtures do not agree on which they emit.
+    text = unicodedata.normalize("NFC", text or "")
+    text = spell_numbers(text, language)
     return " ".join(_PUNCT.sub(" ", text.lower()).split())
 
 
@@ -234,14 +240,20 @@ def align(reference, hypothesis):
     return row[m][1]
 
 
-def score_text(intended, heard):
+def score_text(intended, heard, language=None):
     """
     How far the spoken content is from the text that was asked for.
 
     Returns character error rate together with the insertion and deletion
     rates it is made of, each relative to the intended length.
     """
-    reference, hypothesis = normalize(intended), normalize(heard)
+    # One language for both sides, read off the text that was asked for.
+    # Inferring per string would spell the reference in English and a
+    # Devanagari transcript of it in Hindi, and score every number as a
+    # substitution — the error this normaliser exists to remove.
+    language = language or script_language(intended or "")
+    reference = normalize(intended, language)
+    hypothesis = normalize(heard, language)
 
     if not reference:
         return {"cer": float("nan"), "extra": float("nan"),

@@ -1,0 +1,97 @@
+{
+  "_note": "The Hindi half of fixture7, frozen. Same paragraph, same speaker, same recording session: fixtures/scripted_text.json's `hi` is what was read aloud in fixtures/hindi_speech.wav, and it splits into exactly twelve sentences that correspond one to one with the English twelve. SELECTED BY SOURCE INDEX, NOT BY RE-RUNNING THE FILTER. fixture7 was cut with a 25-character minimum, and applying that to Hindi gives a different set — 'इकतीस बिल्कुल फ़िट हुए।' is 23 characters where 'Thirty-one fit perfectly.' is 25, so the filter keeps the English sentence and drops its own translation. Two sets selected by independent filters cannot be compared sentence for sentence, and comparing hi->hi against en->en sentence for sentence is the entire reason this file exists. The `english` field on each row is the sentence it pairs with, so the pairing is readable rather than inferred from an index. Devanagari counts about 2.6 bytes a character, so `bytes` is recorded next to `chars` — FINDINGS §13, and the reason the byte-ratio duration formula cannot be trusted across scripts. Text is NFC-normalised.",
+  "source": "fixtures/scripted_text.json",
+  "language": "hi",
+  "selected_from": "fixtures/sentences/fixture7.json",
+  "selection": "same source_index as fixture7, not a re-applied character filter",
+  "sentences": [
+    {
+      "id": 0,
+      "source_index": 0,
+      "text": "मैं आपको बताता हूँ कि यह प्रोजेक्ट असल में क्या करता है।",
+      "english": "Let me tell you what this project actually does.",
+      "chars": 56,
+      "bytes": 146
+    },
+    {
+      "id": 1,
+      "source_index": 1,
+      "text": "आप इसे एक वीडियो देते हैं — कोई लेक्चर, कोई इंटरव्यू, कुछ भी जिसमें साफ़ आवाज़ हो — और यह वही वीडियो हिंदी में बोलता हुआ वापस देता है।",
+      "english": "You give it a video — a lecture, an interview, anything with clear speech — and it gives you back the same video speaking Hindi.",
+      "chars": 134,
+      "bytes": 342
+    },
+    {
+      "id": 2,
+      "source_index": 4,
+      "text": "हिंदी को कहने में अंग्रेज़ी से लगभग बीस प्रतिशत ज़्यादा समय लगता है, और शब्द फिर भी उन्हीं तीन सेकंड में आने चाहिए।",
+      "english": "Hindi takes about twenty percent longer to say than the English it replaces, and the words still have to land in the same three seconds.",
+      "chars": 115,
+      "bytes": 299
+    },
+    {
+      "id": 3,
+      "source_index": 6,
+      "text": "हम हर वाक्य के लिए छह अलग अनुवाद बनाते हैं, नापते हैं कि हर एक को बोलने में कितना समय लगेगा, और वही रखते हैं जो समय में फ़िट हो और मतलब भी न खोए।",
+      "english": "We generate six different translations for every sentence, measure how long each one would take to speak, and keep the one that fits without losing the meaning.",
+      "chars": 145,
+      "bytes": 363
+    },
+    {
+      "id": 4,
+      "source_index": 7,
+      "text": "पिछले हफ़्ते सिस्टम ने सैंतालीस सेगमेंट प्रोसेस किए।",
+      "english": "Last week the system processed forty-seven segments.",
+      "chars": 52,
+      "bytes": 142
+    },
+    {
+      "id": 5,
+      "source_index": 8,
+      "text": "इकतीस बिल्कुल फ़िट हुए।",
+      "english": "Thirty-one fit perfectly.",
+      "chars": 23,
+      "bytes": 63
+    },
+    {
+      "id": 6,
+      "source_index": 10,
+      "text": "सात नामुमकिन थे, उन्हें दोबारा लिखना पड़ा।",
+      "english": "Seven were impossible, and we had to rewrite them.",
+      "chars": 42,
+      "bytes": 112
+    }
+  ],
+  "excluded": [
+    {
+      "source_index": 2,
+      "text": "आसान लगता है, है ना?",
+      "chars": 20,
+      "reason": "not in fixture7: shorter than its 25-character minimum in English"
+    },
+    {
+      "source_index": 3,
+      "text": "है नहीं।",
+      "chars": 8,
+      "reason": "not in fixture7: shorter than its 25-character minimum in English"
+    },
+    {
+      "source_index": 5,
+      "text": "तो हम क्या करते हैं?",
+      "chars": 20,
+      "reason": "not in fixture7: shorter than its 25-character minimum in English"
+    },
+    {
+      "source_index": 9,
+      "text": "नौ को खींचना पड़ा।",
+      "chars": 18,
+      "reason": "not in fixture7: shorter than its 25-character minimum in English"
+    },
+    {
+      "source_index": 11,
+      "text": "असली काम यही है — मॉडल नहीं, उनके बीच का हिसाब।",
+      "chars": 47,
+      "reason": "not in fixture7: past its 7-sentence limit"
+    }
+  ]
+}
