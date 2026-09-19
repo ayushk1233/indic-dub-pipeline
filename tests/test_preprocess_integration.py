@@ -6,7 +6,7 @@ import yaml
 from src.stages.preprocess import FFmpegPreprocessStage
 
 
-TEST_AUDIO = "test.mp4"
+from fixture_media import TEST_VIDEO as TEST_AUDIO
 
 
 def load_cfg():

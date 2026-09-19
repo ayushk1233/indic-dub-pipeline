@@ -25,7 +25,7 @@ from src.stages.translation.models import TranslatedSegment, TranslationResult
 from src.stages.tts.models import SynthesisRequest, SynthesisResult, SynthesizedSegment
 
 
-TEST_VIDEO = "test.mp4"
+from fixture_media import TEST_VIDEO
 SAMPLE_RATE = 24000
 
 

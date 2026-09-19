@@ -1,7 +1,8 @@
 """
 Tests for putting the dubbed track back onto the video.
 
-These run against the repo's real test.mp4, because the failure this guards
+These run against a short generated clip (tests/fixture_media.py), because the
+failure this guards
 against — audio and video disagreeing about how long the file is — only shows
 up in a real container.
 """
@@ -19,7 +20,7 @@ from src.stages.remux import (
 )
 
 
-TEST_VIDEO = "test.mp4"
+from fixture_media import TEST_VIDEO
 SAMPLE_RATE = 24000
 
 

@@ -19,7 +19,7 @@ from src.stages.reference import (
 )
 
 
-TEST_VIDEO = "test.mp4"
+from fixture_media import TEST_VIDEO
 
 
 def read(path):

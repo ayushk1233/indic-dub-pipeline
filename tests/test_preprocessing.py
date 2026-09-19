@@ -7,7 +7,7 @@ from src.stages.preprocessing.segmentation import Segmenter
 from src.stages.preprocessing.validator import validate_media
 
 
-TEST_AUDIO = "test.mp4"
+from fixture_media import TEST_VIDEO as TEST_AUDIO
 
 
 def test_validate_media():
