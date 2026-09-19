@@ -60,6 +60,7 @@ import torch
 from colab import workspace
 from colab.indicf5_check import (
     FIXTURES,
+    normalize,
     MAX_CER,
     MAX_EXTRA,
     MAX_MISSING,
@@ -70,6 +71,7 @@ from colab.indicf5_check import (
 )
 from colab.indicf5_diagnose import FRAME_RATE, install_patches, _calls, _mode
 from colab.indicf5_english import MAX_LEAD, plain
+from src.text.loanwords import fold_loanwords, latin_words
 from src.eval.translation_metrics import script_ratio
 
 OUT = workspace.out("indicf5_hindi_probe")
@@ -90,8 +92,23 @@ SEEDS = (0, 1, 2)
 # Hindi synthesis may still come back transcribed in Latin — Whisper's
 # `language` is a hint, not a constraint (FINDINGS §13). A transcript in the
 # wrong script scores as all errors, which reads as the model failing when the
-# ruler is what moved. Gate on script before reading any error rate.
-MIN_DEVANAGARI_FRACTION = 0.9
+# ruler is what moved.
+#
+# The first run of this probe set one threshold at 0.9 and it was wrong, in the
+# direction that flatters. Hindi writes English loanwords in Devanagari and
+# Whisper writes them in either script, so `इकतीस बिल्कुल फ़िट हुए।` heard as
+# `31 बिलकुल fit हुए` is 67% Devanagari — and correct. Five clips were excluded
+# for saying the right words, all five on the two loanword-heavy sentences, so
+# the exclusions were not random and the arm's mean improved by losing them.
+#
+# Two thresholds now, and the fraction is measured AFTER the loanword table has
+# folded what it recognises (src/text/loanwords.py), so only Latin the corpus
+# cannot account for is still counted as Latin:
+#
+#   below MIN   the transcript is not Hindi. Nothing can be read off it.
+#   below MIXED still scored, and reported, with the Latin words named.
+MIN_DEVANAGARI_FRACTION = 0.5
+MIXED_DEVANAGARI_FRACTION = 0.9
 
 # The generated span must match the slot to within a mel frame. Wider than that
 # and fix_duration did not take effect, whatever the report says.
@@ -180,6 +197,22 @@ def _rebuild_rows():
     return rows
 
 
+def missing_floor_clips():
+    """
+    Which of his own Hindi clips are not here.
+
+    Measured 2026-09-19: fixtures/hi_speaker/slots.json reached Kaggle and the
+    seven wavs did not, because .gitignore un-ignores fixtures/en_speaker/*.wav
+    by name and nothing reached the Hindi directory. floor_rows() found the
+    directory, found no clips, and returned an empty list. The report printed
+    `floor (him) cer -` and a verdict under it, which is a synthesis CER read
+    against zero — the one thing this probe exists to prevent.
+    """
+    frozen = json.loads(SENTENCES.read_text(encoding="utf-8"))["sentences"]
+    return [e["id"] for e in frozen
+            if not (HI_SPEAKER / f"{e['id']:02d}.wav").exists()]
+
+
 def floor_rows():
     """
     His own Hindi recordings, scored through the identical path.
@@ -240,7 +273,7 @@ def _provenance():
 # ------------------------------------------------------------------- main
 
 
-def main(seeds=SEEDS):
+def main(seeds=SEEDS, require_floor=True):
     _lines.clear()
 
     for path in (SENTENCES, SLOTS):
@@ -248,6 +281,21 @@ def main(seeds=SEEDS):
             p(f"!! missing {path}")
             p("   Run scripts.slice_hindi_sentences locally, commit, then pull.")
             return []
+
+    absent = missing_floor_clips()
+    if absent and require_floor:
+        p(f"!! {len(absent)} of his own Hindi clips are missing: {absent}")
+        p(f"   Expected under {HI_SPEAKER}/NN.wav")
+        p("")
+        p("   Without them there is no content floor, and a synthesis CER read")
+        p("   against zero is not a measurement — Whisper misreads his real")
+        p("   Hindi too. This run is refused rather than spent, because the")
+        p("   numbers it would produce look complete and cannot be calibrated.")
+        p("")
+        p("   .gitignore un-ignores fixtures/en_speaker/*.wav by name. If the")
+        p("   Hindi line is missing, slots.json arrives and the audio does not.")
+        p("   Pass require_floor=False to run anyway and know that you did.")
+        return []
 
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -400,6 +448,11 @@ def rescore():
             entry["path"] = Path(entry["path"])
             rows.append(entry)
 
+    absent = missing_floor_clips()
+    if absent:
+        p(f"  !! no floor clips for {absent} — this rescore cannot calibrate")
+        p(f"     anything. git pull and check {HI_SPEAKER} before reading it.")
+
     covered = {(r["label"], r["index"]) for r in rows}
     orphans = [r for r in _rebuild_rows() if (r["label"], r["index"]) not in covered]
     if orphans:
@@ -427,17 +480,44 @@ def report_rows(rows):
     p("  back in Latin scores as every character wrong, and that is the ruler")
     p("  moving rather than the model.")
     p("")
+    p("  Hindi writes English loanwords in Devanagari and Whisper writes them")
+    p("  in either script — the same run wrote लेक्शर for his own voice and")
+    p("  `lecture` for the synthesis of that word. The table in")
+    p("  src/text/loanwords.py folds the ones this corpus contains, and the")
+    p("  fraction below is measured after that, so what is still counted as")
+    p("  Latin is Latin the corpus cannot account for.")
+    p("")
     for row in rows:
-        row["script"] = script_ratio(row.get("heard") or "", "hi")
+        heard = row.get("heard") or ""
+        folded = normalize(heard, "hi")
+        row["script_heard"] = script_ratio(heard, "hi")
+        row["script"] = script_ratio(folded, "hi")
+        row["latin_left"] = latin_words(folded)
+        row["folded"] = sorted(set(latin_words(heard)) - set(row["latin_left"]))
+
+    mixed = [r for r in rows if r["script_heard"] < MIXED_DEVANAGARI_FRACTION]
+    if mixed:
+        p(f"  {len(mixed)} transcript(s) came back script-mixed:")
+        for row in mixed:
+            p(f"     {row['label']:<14}[{row['index']}] "
+              f"{row['script_heard']:.0%} -> {row['script']:.0%} Devanagari"
+              + (f"   folded {row['folded']}" if row["folded"] else "")
+              + (f"   !! still Latin {row['latin_left']}" if row["latin_left"] else ""))
+        p("")
+
     failed = [r for r in rows if r["script"] < MIN_DEVANAGARI_FRACTION]
     if failed:
         for row in failed:
             p(f"  !! {row['label']:<14}[{row['index']}] "
-              f"{row['script']:.0%} Devanagari: {(row.get('heard') or '')[:60]}")
+              f"{row['script']:.0%} Devanagari after folding: "
+              f"{(row.get('heard') or '')[:60]}")
         p("")
-        p("  Rows above are excluded from every content number below.")
+        p("  Rows above are excluded from every content number below. Nothing")
+        p("  else is: a clip whose only Latin was a loanword the corpus spells")
+        p("  in Devanagari said the right word, and excluding it would drop")
+        p(f"  exactly the loanword-heavy sentences and flatter the arm.")
     else:
-        p(f"  All {len(rows)} transcripts came back in Devanagari.")
+        p(f"  All {len(rows)} transcripts are readable as Hindi.")
     scored = [r for r in rows if r["script"] >= MIN_DEVANAGARI_FRACTION]
 
     section("CONTENT — every arm against his own recording")
@@ -507,13 +587,16 @@ def report_rows(rows):
 
     section("PER CLIP")
     p(f"{'label':<14}{'id':>3}{'cer':>7}{'extra':>7}{'miss':>7}{'lead':>6}"
-      f"  heard")
+      f"{'deva':>6}  heard")
     p("")
     for row in sorted(rows, key=lambda r: (r["arm"] != "floor", r["label"], r["index"])):
         flag = " *" if row.get("in_reference") else "  "
+        deva = row.get("script_heard")
         p(f"{row['label']:<14}{row['index']:>3}{fmt(row.get('cer'))}"
           f"{fmt(row.get('extra'))}{fmt(row.get('missing'))}"
-          f"{fmt(row.get('lead'), 6)}{flag}{(row.get('heard') or row.get('asr_error') or '')[:70]}")
+          f"{fmt(row.get('lead'), 6)}"
+          f"{(f'{deva:.0%}' if isinstance(deva, float) else '-'):>6}"
+          f"{flag}{(row.get('heard') or row.get('asr_error') or '')[:70]}")
     p("")
     p("  * inside the reference clip")
 
@@ -529,6 +612,18 @@ def report_rows(rows):
       f"of {len([r for r in scored if r['arm'] == ARM])}")
     if np.isfinite(floor_cer) and np.isfinite(arm_cer):
         p(f"  gap           {arm_cer - floor_cer:+.3f}")
+    else:
+        absent = missing_floor_clips()
+        p("")
+        p("  !! THERE IS NO FLOOR IN THIS REPORT, SO THERE IS NO VERDICT.")
+        p(f"     Missing clips: {absent}, expected under {HI_SPEAKER}/NN.wav")
+        p("")
+        p("     The synthesis number above is a CER read against zero. Whisper")
+        p("     misreads his real Hindi too, and in the same places — the")
+        p("     slicing run wrote फीट for फ़िट, साथ for सात, लेक्शर for लेक्चर")
+        p("     on tape of his actual voice. Without those seven clips scored")
+        p("     through this identical path, nothing above says whether 0.05 is")
+        p("     the model or the ruler.")
     p("")
     p("  Content only. Identity is not measured here and no number in this")
     p("  report speaks to whether the clone sounds like him — see the module")

@@ -43,6 +43,7 @@ import torch
 
 from colab import workspace
 from colab.english_report import cosine
+from src.text.loanwords import fold_loanwords
 from src.text.numbers import script_language, spell_numbers
 
 
@@ -177,6 +178,12 @@ def normalize(text, language=None):
     Punctuation, case and whitespace differences are not the model saying the
     wrong thing. Devanagari danda counts as punctuation.
 
+    English loanwords written in Latin are folded to the Devanagari the
+    fixtures spell them with, for Hindi only — src/text/loanwords.py. Whisper
+    picks a script per word and does not pick the same one twice: the same run
+    wrote `लेक्शर` for the speaker's own voice and `lecture` for the synthesis
+    of that word.
+
     Numbers go too, and they are not a detail. Whisper writes `31`, `47`, `6`
     and `20%` where the scripted text writes "Thirty-one", "forty-seven",
     "six" and "twenty percent", and it does so every time rather than
@@ -189,9 +196,15 @@ def normalize(text, language=None):
     # precomposed (फ़, U+095E) or decomposed (फ + U+093C) depending on what
     # produced the string, and the two are the same word and different
     # characters. Whisper and the fixtures do not agree on which they emit.
+    language = language or script_language(text or "")
     text = unicodedata.normalize("NFC", text or "")
     text = spell_numbers(text, language)
-    return " ".join(_PUNCT.sub(" ", text.lower()).split())
+    text = " ".join(_PUNCT.sub(" ", text.lower()).split())
+    # Last, after the punctuation is gone, so `lecture,` is one word. Whole
+    # words only: a Latin run the table does not know stays Latin and stays
+    # visible in the script fraction, which is where an actual wrong-script
+    # transcript has to remain detectable.
+    return fold_loanwords(text, language)
 
 
 def align(reference, hypothesis):

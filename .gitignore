@@ -48,6 +48,15 @@ artifacts/
 # listened to against; a GPU session without them can report numbers but
 # cannot calibrate them.
 !fixtures/en_speaker/*.wav
+
+# And the Hindi ones, which is its own line for the same reason and was
+# missed once. Measured 2026-09-19: slots.json is not audio, so it reached
+# Kaggle while the seven wavs did not. floor_rows() found the directory,
+# found no clips, returned an empty list, and the report printed a verdict
+# under `floor (him) cer -` — a synthesis CER read against zero, which is
+# the one thing that probe exists to prevent. A gitignore rule cost a GPU
+# session's worth of uncalibratable numbers.
+!fixtures/hi_speaker/*.wav
 *.mp3
 *.flac
 *.aac

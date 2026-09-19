@@ -1,0 +1,23 @@
+{
+  "_note": "Latin spellings of English loanwords, mapped to the Devanagari the Hindi fixtures spell them with. This is a COLLISION TABLE, the same kind of thing as the number table in src/text/numbers.py and justified the same way: Whisper transcribing Hindi writes an English loanword in either script, and the two spellings of one word share no characters, so a correct clip is scored as a total substitution. Measured 2026-09-19: 'इकतीस बिल्कुल फ़िट हुए।' came back as '31 बिलकुल fit हुए' and scored CER 0.227 where the only real error is बिलकुल for बिल्कुल; the same run's script gate then excluded five clips for being 60-76% Devanagari, all five of which had said the right words. IT IS NOT A TRANSLITERATOR AND MUST NOT GROW INTO ONE. A transliterator decides how a word is written from how it sounds, which is the open question of this whole project. This file only makes two written forms of a word that is ALREADY IN THE FIXTURES collide, so every value is checked to occur in the Hindi corpus and the table cannot silently start rewriting words the speaker never said. Applied to Hindi comparisons only — see normalize() in colab/indicf5_check.py. Values are NFC, so फ़ is फ + U+093C.",
+  "language": "hi",
+  "checked_against": [
+    "fixtures/scripted_text.json#hi",
+    "fixtures/reference_text.json#hindi"
+  ],
+  "latin_to_devanagari": {
+    "project": "प्रोजेक्ट",
+    "video": "वीडियो",
+    "lecture": "लेक्चर",
+    "interview": "इंटरव्यू",
+    "system": "सिस्टम",
+    "segment": "सेगमेंट",
+    "segments": "सेगमेंट",
+    "process": "प्रोसेस",
+    "fit": "फ़िट",
+    "second": "सेकंड",
+    "seconds": "सेकंड",
+    "model": "मॉडल",
+    "models": "मॉडल"
+  }
+}

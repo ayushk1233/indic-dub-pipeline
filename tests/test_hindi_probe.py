@@ -231,3 +231,120 @@ def test_the_two_forms_of_a_nukta_letter_are_the_same_word():
     assert normalize(precomposed) == normalize(decomposed)
     assert score_text(f"बिल्कुल {precomposed} हुए",
                       f"बिल्कुल {decomposed} हुए")["cer"] == 0
+
+
+# ------------------------------------------- what the first run got wrong
+
+
+def test_the_floor_clips_are_not_gitignored():
+    """
+    The failure that cost the first hi -> hi session.
+
+    .gitignore ignores *.wav and un-ignores fixtures/en_speaker/*.wav by name.
+    slots.json is not audio, so it reached Kaggle and the seven clips did not;
+    floor_rows() found the directory, found no clips, returned an empty list,
+    and the report printed a verdict under `floor (him) cer -`. That is a
+    synthesis CER read against zero, which is the one thing the probe exists
+    to prevent, and nothing in the run raised.
+    """
+    import subprocess
+
+    for index in range(7):
+        clip = f"fixtures/hi_speaker/{index:02d}.wav"
+        assert Path(clip).exists(), clip
+        ignored = subprocess.run(["git", "check-ignore", "-q", clip]).returncode == 0
+        assert not ignored, f"{clip} is gitignored — it will not reach a GPU host"
+
+
+def test_the_probe_refuses_to_spend_the_gpu_without_a_floor(monkeypatch):
+    """Refused before the model loads, not reported afterwards."""
+    probe = pytest.importorskip("colab.indicf5_hindi_probe")
+
+    monkeypatch.setattr(probe, "missing_floor_clips", lambda: [0, 1, 2])
+    assert probe.main() == []
+    printed = "\n".join(probe._lines)
+    assert "[0, 1, 2]" in printed
+    assert "refused" in printed
+
+
+def test_missing_floor_clips_names_the_ones_that_are_absent(tmp_path, monkeypatch):
+    probe = pytest.importorskip("colab.indicf5_hindi_probe")
+
+    assert probe.missing_floor_clips() == []
+    monkeypatch.setattr(probe, "HI_SPEAKER", tmp_path)
+    assert probe.missing_floor_clips() == [0, 1, 2, 3, 4, 5, 6]
+
+
+# ------------------------------------------------------------- loanwords
+
+
+def test_a_loanword_in_latin_is_not_a_content_error():
+    """
+    Measured 2026-09-19: 'इकतीस बिल्कुल फ़िट हुए।' heard as '31 बिलकुल fit
+    हुए' scored CER 0.227, where the only real error is बिलकुल for बिल्कुल.
+    Hindi writes English loanwords in Devanagari; Whisper writes them in
+    either script and does not pick the same one twice.
+    """
+    asked = "इकतीस बिल्कुल फ़िट हुए।"
+    assert score_text(asked, "31 बिलकुल fit हुए")["cer"] < 0.10
+    assert score_text(asked, "इकतीस बिल्कुल फ़िट हुए")["cer"] == 0
+
+
+def test_the_script_gate_keeps_a_clip_whose_only_latin_was_a_loanword():
+    """
+    The first run set one threshold at 0.9 and excluded five clips for saying
+    the right words. The exclusions fell on the two loanword-heavy sentences,
+    so they were not random and dropping them improved the arm's mean.
+    """
+    probe = pytest.importorskip("colab.indicf5_hindi_probe")
+
+    heard = "31 बिलकुल fit हुए"
+    assert script_ratio(heard, "hi") < probe.MIXED_DEVANAGARI_FRACTION
+    folded = normalize(heard, "hi")
+    assert script_ratio(folded, "hi") >= probe.MIN_DEVANAGARI_FRACTION
+
+
+def test_the_script_gate_still_catches_a_transcript_that_is_not_hindi():
+    """The case the gate was built for has to keep failing."""
+    probe = pytest.importorskip("colab.indicf5_hindi_probe")
+
+    heard = "so let me tell you what this project actually does"
+    assert script_ratio(normalize(heard, "hi"), "hi") < probe.MIN_DEVANAGARI_FRACTION
+
+
+def test_the_loanword_table_only_holds_words_the_fixtures_contain():
+    """
+    The guard that stops a collision table from becoming a transliterator. A
+    transliterator decides how a word is written from how it sounds, which is
+    this project's open question; this table only makes two written forms of a
+    word the speaker actually said collide.
+    """
+    from src.text.loanwords import table
+
+    corpus = unicodedata.normalize("NFC", "\n".join([
+        json.loads(Path("fixtures/scripted_text.json").read_text(encoding="utf-8"))["hi"],
+        json.loads(Path("fixtures/reference_text.json").read_text(
+            encoding="utf-8"))["hindi"]["text"],
+    ]))
+    for latin, devanagari in table("hi").items():
+        assert devanagari in corpus, f"{latin} -> {devanagari} is not in the fixtures"
+
+
+def test_an_unknown_latin_word_stays_latin_and_stays_visible():
+    """Anything the table does not recognise must remain detectable as the
+    wrong script rather than being quietly absorbed."""
+    from src.text.loanwords import fold_loanwords, latin_words
+
+    folded = fold_loanwords("कोई lecture कोई bananagram", "hi")
+    assert "लेक्चर" in folded
+    assert latin_words(folded) == ["bananagram"]
+
+
+def test_the_english_route_is_untouched_by_the_hindi_table():
+    """FINDINGS §4c-§4e are read against these numbers; they must not move."""
+    from src.text.loanwords import fold_loanwords
+
+    assert fold_loanwords("31 fit perfectly", "en") == "31 fit perfectly"
+    assert normalize("Thirty-one fit perfectly.") == normalize("31 fit perfectly.")
+    assert score_text("Last week the system processed forty-seven segments.",
+                      "Last week the system processed 47 segments,")["cer"] == 0
