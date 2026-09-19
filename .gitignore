@@ -86,3 +86,8 @@ transliteration
 FINETUNE_PLAN.md
 TRANSLITERATION_PLAN.md
 PROGRESS.md
+# Research notes pulled in from outside this repo. Deliberately never
+# committed — they were swept into a commit once by `git add -A` and had to
+# be removed by rewriting history before the branch was pushed. Ignoring them
+# is what makes that impossible rather than merely avoided.
+compass_artifact_*.md
