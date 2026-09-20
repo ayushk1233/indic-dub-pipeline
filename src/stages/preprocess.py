@@ -1,0 +1,104 @@
+import json
+import re
+import subprocess
+import time
+from pathlib import Path
+
+import ffmpeg
+
+from src.orchestrator.models import StageResult, StageStatus
+from src.stages.base import PipelineStage
+from src.stages.preprocessing.audio import AudioProcessor
+from src.stages.preprocessing.manifest import ManifestWriter
+from src.stages.preprocessing.segmentation import Segmenter
+from src.stages.preprocessing.validator import validate_media
+
+
+class FFmpegPreprocessStage(PipelineStage):
+    """
+    Phase 1 preprocessing stage.
+
+    This step currently implements only lightweight validation.
+    FFmpeg probing and extraction will be added in later atomic steps.
+    """
+
+    def validate_input(self, input_path: str) -> bool:
+        return validate_media(input_path)
+
+    def run(
+        self,
+        input_path: str,
+        job_id: str,
+        cfg: dict,
+    ) -> StageResult:
+        if not self.validate_input(input_path):
+            return StageResult(
+                stage_name="preprocess",
+                status=StageStatus.FAILED,
+                error="Input validation failed.",
+            )
+
+        # The stage contract is run(input_path, job_id, cfg), so the artifact
+        # root has to arrive through cfg. It was hardcoded here, which meant
+        # --artifacts-root silently did nothing for this stage — JobPaths
+        # honoured it and preprocessing wrote to ./artifacts anyway — and the
+        # suite dropped real job directories into the repo on every run.
+        root = Path((cfg.get("artifacts") or {}).get("root") or "artifacts")
+        output_dir = root / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        start = time.perf_counter()
+
+        audio_processor = AudioProcessor(
+            sample_rate=cfg["audio"]["sample_rate"],
+            channels=cfg["audio"]["channels"],
+        )
+
+        output_audio, latency_ms = audio_processor.extract(
+            input_path=input_path,
+            output_dir=output_dir,
+        )
+
+        total_duration = audio_processor.duration(output_audio)
+
+        segmenter = Segmenter()
+
+        silences = segmenter.detect_silences(str(output_audio))
+
+        segments = segmenter.build_segments(
+            silences,
+            total_duration,
+        )
+
+        if not segments:
+            segments = segmenter.build_fixed_window_segments(
+                total_duration,
+            )
+
+        chunk_paths = segmenter.extract_segments(
+            str(output_audio),
+            segments,
+            output_dir / "chunks",
+        )
+
+        writer = ManifestWriter()
+
+        manifest_path = writer.write(
+            chunk_paths=chunk_paths,
+            segments=segments,
+            output_path=output_dir / "manifest.json",
+        )
+
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        return StageResult(
+            stage_name="preprocess",
+            status=StageStatus.DONE,
+            output_path=str(manifest_path),
+            metrics={
+                "latency_ms": latency_ms,
+                "sample_rate": cfg["audio"]["sample_rate"],
+                "channels": cfg["audio"]["channels"],
+                "num_segments": len(chunk_paths),
+            },
+        )

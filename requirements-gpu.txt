@@ -1,0 +1,35 @@
+# GPU-side dependencies: synthesis only.
+#
+# This side runs one thing — colab/indicf5_worker.py — so it never loads
+# IndicTrans2 and is not bound by requirements.txt's transformers<4.47 pin.
+# Install this AFTER IndicF5 so these constraints are the surviving ones:
+#
+#   pip install git+https://github.com/ai4bharat/IndicF5.git
+#   pip install -r requirements-gpu.txt
+#
+# torch, torchaudio and torchvision are intentionally NOT pinned. Kaggle and
+# Colab each ship a mutually consistent, CUDA-matched set, and replacing it
+# costs several GB and routinely leaves a torch that cannot see the GPU.
+
+transformers>=4.57,<5
+
+soundfile
+librosa>=0.10.0
+einops
+
+# numpy is squeezed from two sides and the window is narrow:
+#
+#   transformers 4.57  needs >= 2.0   — it touches numpy.dtypes.StringDType
+#   numba (via librosa) needs < 2.3   — hard version check, refuses at import
+#
+# f5-tts declares numpy<=1.26.4 and that declaration is deliberately
+# overridden. pip will print a conflict for it on every install. **That line
+# is expected and is not a failure** — the pin is a ceiling inherited from an
+# older scientific stack, and IndicF5 runs correctly on numpy 2.2.
+#
+# Getting this wrong is expensive to debug, because numpy 1.x breaks
+# transformers *silently*: its lazy loader catches the AttributeError raised
+# while building the torch-backed classes and drops those names. So
+# `import transformers` succeeds, the version string looks right, and the
+# only symptom is a missing model class reported from somewhere unrelated.
+numpy>=2.1,<2.3

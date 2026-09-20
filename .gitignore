@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Job output. Every run writes here; nothing in it belongs in the repo.
+artifacts/
+
+# Media. Source videos and generated audio are large and are the user's own.
+*.mp4
+*.mov
+*.wav
+*.zip
+!fixtures/**/*.wav
+
+# Models and caches
+*.pt
+*.pth
+*.ckpt
+.cache/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
