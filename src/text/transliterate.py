@@ -66,6 +66,17 @@ VOWELS = {
 VIRAMA = "्"
 ANUSVARA = "ं"
 
+# Nasals that can be written as an anusvara on the syllable before them
+# rather than spelled out with their own letter.
+NASALS = frozenset({"N", "M"})
+
+# What has to follow for that to happen. Hindi takes the anusvara before a
+# stop, an affricate or a fricative — नंबर, कंटेंट, आंसर — but keeps the full
+# nasal letter before another nasal (`unknown` is अननोन), before the
+# semivowels य र ल व (`only` is ओनली), and before ह. NG is excluded here
+# because it has its own branch below.
+ANUSVARA_BEFORE = frozenset(CONSONANTS) - NASALS - {"NG", "Y", "W", "V", "R", "L", "HH"}
+
 _STRESS = re.compile(r"\d")
 _WORD = re.compile(r"[A-Za-z']+")
 
@@ -110,6 +121,20 @@ def phonemes_to_devanagari(phones: list[str]) -> str:
             # anusvara, and it only keeps its own ग when no other velar
             # follows to carry the place of articulation.
             out.append(ANUSVARA if following in {"G", "K"} else ANUSVARA + "ग")
+            index += 1
+            continue
+
+        if (
+            phone in NASALS
+            and following in ANUSVARA_BEFORE
+            and out
+            and out[-1] != VIRAMA
+        ):
+            # `and` is एंड and `number` is नंबर, not अन्ड and नम्बर. The
+            # anusvara rides the syllable already written, so it needs one to
+            # ride: a word-initial nasal, or one right after a virama, falls
+            # through and keeps its own letter.
+            out.append(ANUSVARA)
             index += 1
             continue
 

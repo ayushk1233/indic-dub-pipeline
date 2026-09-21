@@ -15,6 +15,7 @@ abugida logic lives. Tests that need CMUdict are marked and skip without it.
 import pytest
 
 from src.text.transliterate import (
+    ANUSVARA,
     VIRAMA,
     phonemes_to_devanagari,
     transliterate_to_devanagari,
@@ -135,3 +136,81 @@ def test_the_output_is_about_as_long_as_the_input():
               "You get a video, a lecture or an interview.")
 
     assert len(transliterate_to_devanagari(source)) < len(source) * 1.15
+
+
+# -- a nasal before a stop is an anusvara, not a conjunct ---------------------
+#
+# This was wrong until it was measured against a real reference transcript:
+# ANUSVARA was reachable only from the NG branch, so every other nasal fell
+# through to the generic consonant path and took a virama. `and` came out
+# अन्ड, `number` नम्बर, `content` कान्टेन्ट. The reference transcript is the
+# one input IndicF5 conditions on, and it was being handed an orthography
+# Hindi does not use.
+
+
+def test_a_nasal_before_a_stop_becomes_an_anusvara():
+    """
+    `and` is एंड and `number` is नंबर. Hindi writes the nasal as an anusvara on
+    the syllable before it rather than spelling the cluster out, and English
+    loanwords follow that convention.
+    """
+    assert phonemes_to_devanagari(["AH0", "N", "D"]) == "अंड"
+    assert phonemes_to_devanagari(["N", "AH1", "M", "B", "ER0"]) == "नंबर"
+    assert VIRAMA not in phonemes_to_devanagari(["P", "OY1", "N", "T"])
+
+
+def test_the_anusvara_also_applies_before_fricatives():
+    """`answer` and `month` take it too — not only the stops."""
+    assert phonemes_to_devanagari(["M", "AH1", "N", "TH"]) == "मंथ"
+    assert ANUSVARA in phonemes_to_devanagari(["AE1", "N", "S", "ER0"])
+
+
+def test_a_nasal_before_another_nasal_keeps_its_own_letter():
+    """
+    `unknown` is अननोन, never अंनोन. An anusvara takes its place of
+    articulation from what follows, and a following nasal has nothing
+    distinct to give it.
+    """
+    out = phonemes_to_devanagari(["AH0", "N", "N", "OW1", "N"])
+
+    assert ANUSVARA not in out
+
+
+def test_a_nasal_before_a_semivowel_or_h_keeps_its_own_letter():
+    """
+    `only`, `annual`, `convert` and `inherit` are ओनली, ऐन्युअल, कन्वर्ट and
+    इनहेरिट — य र ल व and ह do not take a preceding anusvara.
+    """
+    for phones in (
+        ["OW1", "N", "L", "IY0"],      # only
+        ["AE1", "N", "Y", "UW0"],      # annual, first syllables
+        ["K", "AH0", "N", "V", "ER1"], # convert, first syllables
+        ["IH0", "N", "HH", "EH1"],     # inherit, first syllables
+    ):
+        assert ANUSVARA not in phonemes_to_devanagari(phones)
+
+
+def test_a_nasal_before_a_vowel_is_an_ordinary_consonant():
+    """`common` is कामन: the rule is about clusters, not about nasals."""
+    out = phonemes_to_devanagari(["K", "AA1", "M", "AH0", "N"])
+
+    assert ANUSVARA not in out
+    assert VIRAMA not in out
+
+
+def test_a_word_initial_nasal_has_no_syllable_to_carry_the_anusvara():
+    """
+    An anusvara rides the syllable already written. With nothing written yet
+    there is nothing to ride, so the nasal keeps its letter rather than
+    producing a stray mark at the start of the word.
+    """
+    out = phonemes_to_devanagari(["N", "T", "AA1"])
+
+    assert not out.startswith(ANUSVARA)
+    assert out.startswith("न")
+
+
+def test_the_velar_nasal_is_untouched_by_the_new_rule():
+    """NG has its own branch and the regression would be silent."""
+    assert phonemes_to_devanagari(["M", "IY1", "N", "IH0", "NG"]) == "मीनिंग"
+    assert phonemes_to_devanagari(["TH", "IH1", "NG", "K"]) == "थिंक"
