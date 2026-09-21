@@ -20,7 +20,14 @@ einops
 # numpy is squeezed from two sides and the window is narrow:
 #
 #   transformers 4.57  needs >= 2.0   — it touches numpy.dtypes.StringDType
-#   numba (via librosa) needs < 2.3   — hard version check, refuses at import
+#   numba (via librosa) needs a ceiling — hard version check, refuses at import
+#
+# That numba ceiling is NOT a constant, which is what made this bite on the
+# first real GPU host: 0.60 caps numpy at <2.1, 0.61 at <2.2, 0.62 at <2.4.
+# Kaggle preinstalls 0.60, so an unpinned numba plus the numpy below fails at
+# `import librosa` with "Numba needs NumPy 2.0 or less. Got NumPy 2.2" —
+# after the model has already been fetched. numba is pinned below for that
+# reason; do not remove it because the install looks clean without it.
 #
 # f5-tts declares numpy<=1.26.4 and that declaration is deliberately
 # overridden. pip will print a conflict for it on every install. **That line
@@ -33,3 +40,7 @@ einops
 # `import transformers` succeeds, the version string looks right, and the
 # only symptom is a missing model class reported from somewhere unrelated.
 numpy>=2.1,<2.3
+
+# Must come from the same install as numpy above, and must be new enough to
+# accept it. The host's preinstalled numba is routinely older than that.
+numba>=0.62
