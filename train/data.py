@@ -73,17 +73,24 @@ def write_manifest_dir(rows, out_dir, groups=None):
 
 
 class ManifestDataset(Dataset):
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, root=None):
         from datasets import load_from_disk
 
-        self.dir = Path(data_dir)
+        self.dir, self.root = Path(data_dir), root
         rows = load_from_disk(str(self.dir / "raw"))
+        base = Path(root) if root is not None else self.dir.parent.parent   # <root>/route_x/<split>/
+        # relative audio paths resolve in memory: /kaggle/input is read-only, so no cache files beside the data
+        rows = rows.map(lambda r: {"audio_path": r["audio_path"] if Path(r["audio_path"]).is_absolute()
+                                   else str(base / r["audio_path"])}, keep_in_memory=True)
         durations = json.loads((self.dir / "duration.json").read_text())["duration"]
         if len(durations) != len(rows):
             raise ValueError(f"{self.dir}: {len(rows)} rows but {len(durations)} durations")
         self._inner = import_vendor().CustomDataset(rows, durations=durations)
         groups = self.dir / "groups.json"
         self.groups = json.loads(groups.read_text()) if groups.exists() else ["all"] * len(rows)
+
+    def __reduce__(self):                    # DataLoader workers rebuild from disk, not by pickling CustomDataset
+        return ManifestDataset, (self.dir, self.root)
 
     def __len__(self):
         return len(self._inner)
