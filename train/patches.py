@@ -66,6 +66,8 @@ def import_vendor() -> types.SimpleNamespace:
     from f5_tts.model import cfm, dataset, modules, utils
     from f5_tts.model.backbones import dit
 
+    package = sys.modules["f5_tts.model"]           # the names its bypassed __init__ exports; vendored
+    package.CFM, package.DiT = cfm.CFM, dit.DiT      # utils_infer imports them (still no trainer, no wandb)
     utils.list_str_to_idx = strict_list_str_to_idx
     cfm.list_str_to_idx = strict_list_str_to_idx          # cfm imported the name directly
     dataset.CustomDataset.__getitem__ = strict_getitem

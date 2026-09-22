@@ -21,7 +21,7 @@ VOCODER_PREFIX = "vocoder._orig_mod."         # Vocos, shipped in the same file
 
 def split_release(sd):
     """IndicF5's release model.safetensors -> (CFM state dict, Vocos state dict). Plain CFM dicts pass through."""
-    if not any(k.startswith(RELEASE_PREFIX) for k in sd):
+    if not any(k.startswith((RELEASE_PREFIX, VOCODER_PREFIX)) for k in sd):
         return sd, {}
     cfm, voc, other = {}, {}, []
     for k, v in sd.items():
