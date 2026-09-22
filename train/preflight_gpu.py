@@ -40,10 +40,10 @@ def g3_verdict(ours, official, tol=1e-3):
 
 
 def g5_verdict(losses):
-    """Expect val_hi well below val_en (every transcript form). Without val_indic the check is partial."""
+    """Expect val_hi well below val_en (every transcript form). Until step 2 builds val_indic the check is partial."""
     shown = ", ".join(f"{k} {v:.4f}" for k, v in losses.items())
     if "hi" not in losses:
-        return _r(True, f"{shown}; val_indic not available (licence gate, §2b q2)", status="partial", **losses)
+        return _r(True, f"{shown}; val_indic not built yet (§15 step 2)", status="partial", **losses)
     en = [v for k, v in losses.items() if k.startswith("en")]
     return _r(all(losses["hi"] < v for v in en), shown, **losses)
 
