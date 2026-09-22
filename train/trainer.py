@@ -31,6 +31,24 @@ from train.validation import FixedNoiseValidator
 STATE_KEYS = ("update", "epoch", "batch", "nan_streak", "lr_scale", "recent_losses", "val_history")
 
 
+def _collate(items):
+    return import_vendor().collate_fn(items)
+
+
+class _Groups(torch.utils.data.Dataset):
+    """Group index -> the collated micro-batches of one update. Indices are fixed by the sampler, so worker
+    prefetch cannot change what is trained on (C6)."""
+
+    def __init__(self, dataset, groups):
+        self.dataset, self.groups = dataset, groups
+
+    def __len__(self):
+        return len(self.groups)
+
+    def __getitem__(self, i):
+        return [_collate([self.dataset[j] for j in idxs]) for idxs in self.groups[i]]
+
+
 class DivergenceError(RuntimeError):
     pass
 
@@ -135,10 +153,21 @@ class Trainer:
             while self.state["epoch"] < self.cfg["schedule"]["epochs"]:
                 epoch, batches = self.state["epoch"], self._epoch_batches()
                 while self.state["epoch"] == epoch and self.state["batch"] < len(batches):
-                    self._update(batches[self.state["batch"]: self.state["batch"] + self.accum])
-                    reason = self._after_update()
-                    if reason:
-                        return reason
+                    start = self.state["batch"]
+                    groups = [batches[b: b + self.accum] for b in range(start, len(batches), self.accum)]
+                    it = iter(self._loader(groups))
+                    while True:
+                        t0 = time.perf_counter()
+                        micro = next(it, None)
+                        if micro is None:
+                            break
+                        expected = self.state["batch"] + self.accum
+                        self._update(micro, data_s=time.perf_counter() - t0)
+                        reason = self._after_update()
+                        if reason:
+                            return reason
+                        if self.state["epoch"] != epoch or self.state["batch"] != expected:
+                            break                     # a rollback moved the index: rebuild the prefetch from it
                 if self.state["epoch"] == epoch:
                     self._end_epoch()
             if self._last_saved != self.state["update"]:
@@ -148,12 +177,21 @@ class Trainer:
         finally:
             self.uploader.close()
 
-    def _update(self, group):
-        total = 0.0
-        for micro, idxs in enumerate(group):
+    def _loader(self, groups):
+        w = self.cfg["batch"].get("workers", 0)
+        # a private generator: each new iterator draws a worker base seed, and drawing it from the global RNG
+        # would shift the stream restored on resume (C6)
+        return torch.utils.data.DataLoader(_Groups(self.train_set, groups), batch_size=None, shuffle=False,
+                                           num_workers=w, persistent_workers=False,
+                                           generator=torch.Generator().manual_seed(0))
+
+    def _update(self, group, data_s=0.0):
+        t0 = time.perf_counter()
+        total, frames = 0.0, 0
+        for micro, batch in enumerate(group):
             if self.on_micro:
                 self.on_micro(self.state["update"] + 1, micro)
-            batch = self.v.collate_fn([self.train_set[i] for i in idxs])
+            frames += int(batch["mel_lengths"].sum())
             mel = batch["mel"].permute(0, 2, 1).to(self.acc.device)
             lens = batch["mel_lengths"].to(self.acc.device)
             sync = nullcontext() if micro == len(group) - 1 else self.acc.no_sync(self.model)
@@ -165,6 +203,7 @@ class Trainer:
         loss_value = total / len(group)
         if self.acc.num_processes > 1:                     # one loss for all ranks (review #5)
             loss_value = float(self.acc.reduce(torch.tensor([loss_value], device=self.acc.device), "mean"))
+            frames = int(self.acc.reduce(torch.tensor([frames], device=self.acc.device), "sum"))
         grad_norm = float(self.acc.clip_grad_norm_(self.trainable, self.cfg["optim"]["grad_clip"]))
         scaler_active = self.acc.scaler is not None
         scale_before = self.acc.scaler.get_scale() if scaler_active else None
@@ -174,6 +213,10 @@ class Trainer:
                                                    self.acc.optimizer_step_was_skipped)
         outcome = step_outcome(loss_value, grad_norm, scaler_active, skipped)
         self.optimizer.zero_grad(set_to_none=True)
+        step_s = time.perf_counter() - t0
+        metrics = {"step_s": step_s, "data_s": data_s, "frames": frames, "fps": frames / max(step_s + data_s, 1e-9),
+                   "mem_gb": torch.cuda.max_memory_allocated() / 2 ** 30 if torch.cuda.is_available() else 0.0,
+                   "scale": self.acc.scaler.get_scale() if scaler_active else None}
         self.state["batch"] += len(group)
         if outcome == "nonfinite":
             self._log({"event": "nonfinite", "update": self.state["update"], "loss": loss_value})
@@ -193,7 +236,7 @@ class Trainer:
                     raise ResumeError(f"first loss after resume {loss_value:.4f} outside [{low:.4f}, {high:.4f}]")
                 self._resume_band = None
         self._log({"update": self.state["update"], "epoch": self.state["epoch"], "loss": loss_value,
-                   "lr": self.scheduler.get_last_lr()[0], "grad_norm": grad_norm, "outcome": outcome})
+                   "lr": self.scheduler.get_last_lr()[0], "grad_norm": grad_norm, "outcome": outcome, **metrics})
 
     def _after_update(self):
         u, ck = self.state["update"], self.cfg["checkpoint"]
@@ -205,6 +248,13 @@ class Trainer:
                 self.uploader.wait()
                 self._log({"event": "validation_stop", "update": u, "reason": stop})
                 return "validation_stop"
+        cap = self.cfg["schedule"].get("max_updates")
+        if cap and u >= cap:
+            if u != self._last_saved:
+                self._save_last()
+            self.uploader.wait()
+            self._log({"event": "max_updates", "update": u})
+            return "max_updates"
         due = guard = False
         if self.acc.is_main_process:
             minutes = (self.clock() - self._last_save_time) / 60
@@ -225,11 +275,12 @@ class Trainer:
         self._last_val = self.state["update"]
         stop = None
         if self.acc.is_main_process:
-            raw = self._raw()
+            raw, t0 = self._raw(), time.perf_counter()
             result = {"raw": self.validator.evaluate(raw)}
             with self.ema.swapped(raw):
                 result["ema"] = self.validator.evaluate(raw)
-            self._log({"event": "validation", "update": self.state["update"], **result})
+            self._log({"event": "validation", "update": self.state["update"], "seconds": time.perf_counter() - t0,
+                       **result})
             self.state["val_history"] = self.state["val_history"] + [result["ema"]]
             stop = check_stop(self.state["val_history"], self.cfg["validation"]["stop"])
         return self._bcast(stop)

@@ -15,6 +15,7 @@ import sys
 
 import numpy as np
 import torch
+import yaml
 
 from train import lora
 from train.config import load_config
@@ -46,6 +47,19 @@ def _store(spec):
     raise SystemExit(f"unknown store spec {spec!r}")
 
 
+def apply_overrides(cfg, pairs):
+    """--set dotted.key=value, the value parsed as YAML; applied before anything reads the config."""
+    for pair in pairs or []:
+        key, sep, raw = pair.partition("=")
+        if not sep or not key:
+            raise SystemExit(f"--set expects dotted.key=value, got {pair!r}")
+        node, parts = cfg, key.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = yaml.safe_load(raw)
+    return cfg
+
+
 def _die_hook(spec):
     if not spec:
         return None
@@ -64,9 +78,10 @@ def main(argv=None) -> int:
     p.add_argument("--base-sha")
     p.add_argument("--guard-seconds", type=float)
     p.add_argument("--die-at")
+    p.add_argument("--set", action="append", default=[])
     a = p.parse_args(argv)
 
-    cfg = load_config(a.config)
+    cfg = apply_overrides(load_config(a.config), a.set)
     if a.guard_seconds is not None:
         cfg["runtime"]["guard_seconds"] = a.guard_seconds
     if cfg["runtime"].get("deterministic"):
