@@ -78,7 +78,7 @@ def main(argv=None) -> int:
     import_vendor()
     vocab = load_vocab()
     model = build_cfm(cfg, vocab)
-    base_sha = load_base(model, a.base, expected_sha=a.base_sha)
+    base_sha = load_base(model, a.base, expected_sha=a.base_sha or cfg.get("base", {}).get("sha256"))
     model = lora.attach(model, cfg)
     train_set, val_set = _dataset(a.data, vocab), _dataset(a.val, vocab)
     trainer = Trainer(cfg, model=model, train_set=train_set, val_items=val_set.val_items(), store=_store(a.store),

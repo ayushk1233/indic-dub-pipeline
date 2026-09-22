@@ -1,4 +1,5 @@
 route: B
+base: {repo: ai4bharat/IndicF5, revision: ba85abedf18dc479a447eaa0eccbd76ab78a47d5, sha256: ba7f3671180fb7784e24bd1dafc96e729a38ce02e7f6d3877cdef32525a1865c}
 model: {dim: 1024, depth: 22, heads: 16, ff_mult: 2, text_dim: 512, conv_layers: 4}
 mel: {target_sample_rate: 24000, n_mel_channels: 100, hop_length: 256, win_length: 1024, n_fft: 1024, mel_spec_type: vocos}
 cfm: {audio_drop_prob: 0.3, cond_drop_prob: 0.2, frac_lengths_mask: [0.7, 1.0]}
