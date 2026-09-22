@@ -11,11 +11,12 @@ import shutil
 import subprocess
 import time
 from contextlib import nullcontext
+from datetime import timedelta
 from pathlib import Path
 
 import torch
 from accelerate import Accelerator
-from accelerate.utils import broadcast_object_list, gather_object
+from accelerate.utils import InitProcessGroupKwargs, broadcast_object_list, gather_object
 
 from train import checkpoint, lora
 from train.config import config_hash
@@ -53,6 +54,12 @@ def step_outcome(loss, grad_norm, scaler_active, step_skipped):
     return "ok" if math.isfinite(grad_norm) else "nonfinite"
 
 
+def scaler_skipped(scale_before, scale_after, reported):
+    # fused AdamW skips an overflowing step inside the kernel, so accelerate reports it as taken;
+    # GradScaler lowering its scale is the reliable sign (review #4)
+    return reported or scale_after < scale_before
+
+
 def _git_commit():
     try:
         return subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
@@ -68,7 +75,10 @@ class Trainer:
         self.base_sha, self.manifest_sha, self.cfg_hash = base_sha, manifest_sha, config_hash(cfg)
         self.clock, self.on_micro = clock, on_micro
         self.v = import_vendor()
-        self.acc = Accelerator(mixed_precision=cfg["precision"], cpu=not torch.cuda.is_available())
+        # rank 1 waits in a collective while rank 0 writes and uploads a checkpoint; NCCL's 10 min default
+        # is shorter than a slow Hub upload (review #6)
+        self.acc = Accelerator(mixed_precision=cfg["precision"], cpu=not torch.cuda.is_available(),
+                               kwargs_handlers=[InitProcessGroupKwargs(timeout=timedelta(hours=1))])
         self.train_set = train_set
         b = cfg["batch"]
         self.accum = b["grad_accum"]
@@ -81,13 +91,13 @@ class Trainer:
         self.total_updates = self.updates_per_epoch * cfg["schedule"]["epochs"]
         self.state = {"update": 0, "epoch": 0, "batch": 0, "nan_streak": 0, "lr_scale": 1.0, "recent_losses": [],
                       "val_history": []}
-        self.ema = TrainableEMA(model, cfg["ema"]["decay"], cfg["ema"]["start_after"])
         self.validator = FixedNoiseValidator(val_items, model.vocab_char_map, cfg["validation"]["seed"])
         o = cfg["optim"]
         optimizer = torch.optim.AdamW(lora.param_groups(model, cfg), betas=tuple(o["betas"]), eps=o["eps"], fused=True)
         self.scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, self._lr_lambda)
         self.model, self.optimizer = self.acc.prepare(model, optimizer)
         self.trainable = [p for p in self.model.parameters() if p.requires_grad]
+        self.ema = TrainableEMA(self._raw(), cfg["ema"]["decay"], cfg["ema"]["start_after"])   # on the model's device
         self._last_saved, self._last_val, self._resume_band = -1, -1, None
 
     # ---- helpers
@@ -101,6 +111,10 @@ class Trainer:
     def _apply_lr(self):
         for group, base in zip(self.optimizer.param_groups, self.scheduler.base_lrs):
             group["lr"] = base * self._lr_lambda(self.scheduler.last_epoch)
+
+    def _bcast(self, obj):
+        # every control-flow decision is rank 0's, so ranks never reach different collectives (review #3)
+        return broadcast_object_list([obj])[0] if self.acc.num_processes > 1 else obj
 
     def _log(self, entry):
         if self.acc.is_main_process:
@@ -149,12 +163,16 @@ class Trainer:
                 self.acc.backward(loss / len(group))
             total += float(loss.detach())
         loss_value = total / len(group)
+        if self.acc.num_processes > 1:                     # one loss for all ranks (review #5)
+            loss_value = float(self.acc.reduce(torch.tensor([loss_value], device=self.acc.device), "mean"))
         grad_norm = float(self.acc.clip_grad_norm_(self.trainable, self.cfg["optim"]["grad_clip"]))
         scaler_active = self.acc.scaler is not None
+        scale_before = self.acc.scaler.get_scale() if scaler_active else None
         if scaler_active or (math.isfinite(loss_value) and math.isfinite(grad_norm)):
             self.optimizer.step()
-        outcome = step_outcome(loss_value, grad_norm, scaler_active,
-                               scaler_active and self.acc.optimizer_step_was_skipped)
+        skipped = scaler_active and scaler_skipped(scale_before, self.acc.scaler.get_scale(),
+                                                   self.acc.optimizer_step_was_skipped)
+        outcome = step_outcome(loss_value, grad_norm, scaler_active, skipped)
         self.optimizer.zero_grad(set_to_none=True)
         self.state["batch"] += len(group)
         if outcome == "nonfinite":
@@ -187,10 +205,15 @@ class Trainer:
                 self.uploader.wait()
                 self._log({"event": "validation_stop", "update": u, "reason": stop})
                 return "validation_stop"
-        due = u % ck["every_updates"] == 0 or (self.clock() - self._last_save_time) / 60 >= ck["every_minutes"]
-        if u and due and u != self._last_saved:
+        due = guard = False
+        if self.acc.is_main_process:
+            minutes = (self.clock() - self._last_save_time) / 60
+            due = bool(u) and u != self._last_saved and (u % ck["every_updates"] == 0 or minutes >= ck["every_minutes"])
+            guard = self.clock() - self._start >= self.cfg["runtime"]["guard_seconds"]
+        due, guard = self._bcast((due, guard))
+        if due:
             self._save_last()
-        if self.clock() - self._start >= self.cfg["runtime"]["guard_seconds"]:
+        if guard:
             if u != self._last_saved:
                 self._save_last()
             self.uploader.wait()
@@ -209,15 +232,14 @@ class Trainer:
             self._log({"event": "validation", "update": self.state["update"], **result})
             self.state["val_history"] = self.state["val_history"] + [result["ema"]]
             stop = check_stop(self.state["val_history"], self.cfg["validation"]["stop"])
-        if self.acc.num_processes > 1:
-            stop = broadcast_object_list([stop])[0]
-        return stop
+        return self._bcast(stop)
 
     # ---- checkpoints
     def _state_for_save(self):
         rng = capture_rng()
         ranks = gather_object([rng]) if self.acc.num_processes > 1 else [rng]
-        return dict(self.state, rng=ranks, micro=0, config_hash=self.cfg_hash, manifest_sha256=self.manifest_sha,
+        return dict(self.state, rng=ranks, micro=0, world_size=self.acc.num_processes,
+                    config_hash=self.cfg_hash, manifest_sha256=self.manifest_sha,
                     base_sha256=self.base_sha, git_commit=_git_commit(), saved_at=time.time())
 
     def _save_last(self):
@@ -251,7 +273,7 @@ class Trainer:
 
     def _load(self, path):
         ck = checkpoint.load_checkpoint(path, config_hash=self.cfg_hash, manifest_sha=self.manifest_sha,
-                                        base_sha=self.base_sha)
+                                        base_sha=self.base_sha, world_size=self.acc.num_processes)
         lora.load_trainable(self._raw(), ck["trainable"])
         self.ema.load_shadow(ck["ema"])
         o = ck["optim_state"]
@@ -263,14 +285,16 @@ class Trainer:
         restore_rng(ck["state"]["rng"][self.acc.process_index])
 
     def _maybe_resume(self):
-        latest = read_latest(self.store)
+        latest = self._bcast(read_latest(self.store) if self.acc.is_main_process else None)
         if latest is None:
             self._log({"event": "fresh_start"})
             return
-        local = download_checkpoint(self.store, latest, self.work / "resume")
-        self._load(local)
-        shutil.rmtree(self.work / "last", ignore_errors=True)
-        shutil.copytree(local, self.work / "last")                  # rollback target in a fresh container
+        if self.acc.is_main_process:                        # one download into the shared work dir (review #2)
+            local = download_checkpoint(self.store, latest, self.work / "resume")
+            shutil.rmtree(self.work / "last", ignore_errors=True)
+            shutil.copytree(local, self.work / "last")      # rollback target in a fresh container
+        self.acc.wait_for_everyone()
+        self._load(self.work / "resume")
         self._last_saved = self._last_val = self.state["update"]
         recent = self.state["recent_losses"]
         if recent:

@@ -15,13 +15,15 @@ class TrainableEMA:
     def update(self, model, step: int) -> None:
         for n, p in model.named_parameters():
             if n in self.shadow:
+                if self.shadow[n].device != p.device:          # model moved (CUDA) after the EMA was built
+                    self.shadow[n] = self.shadow[n].to(p.device)
                 if step < self.start_after:
                     self.shadow[n].copy_(p.detach().float())
                 else:
                     self.shadow[n].mul_(self.decay).add_(p.detach().float(), alpha=1 - self.decay)
 
     def shadow_state(self) -> dict[str, torch.Tensor]:
-        return {n: t.clone() for n, t in self.shadow.items()}
+        return {n: t.detach().cpu().clone() for n, t in self.shadow.items()}
 
     def load_shadow(self, sd) -> None:
         if set(sd) != set(self.shadow):

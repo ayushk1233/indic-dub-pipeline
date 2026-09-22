@@ -45,3 +45,12 @@ def test_shadow_round_trip_is_strict(tiny_cfg, tiny_model):
     assert all(torch.equal(sd[k], v) for k, v in ema.shadow_state().items())
     with pytest.raises(KeyError):
         ema.load_shadow({})
+
+
+def test_shadow_follows_the_parameter_device(tiny_cfg, tiny_model):
+    # Review #1: EMA built on CPU, model later moved (to CUDA on Kaggle; to meta here).
+    model = lora.attach(tiny_model, tiny_cfg)
+    ema = TrainableEMA(model, 0.9, start_after=0)
+    model.to("meta")
+    ema.update(model, 5)
+    assert all(t.device.type == "meta" for t in ema.shadow.values())

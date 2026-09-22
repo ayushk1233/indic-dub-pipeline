@@ -78,3 +78,24 @@ def test_resume_refuses_on_changed_config_manifest_or_base(tmp_path, field, kw):
     _save(tmp_path / "last")
     with pytest.raises(CheckpointMismatch, match=field):
         _load(tmp_path / "last", **{kw: "x" * 64})
+
+
+@pytest.mark.skipif(not (torch.cuda.is_available() or torch.backends.mps.is_available()), reason="needs a second device")
+def test_optimizer_state_loads_onto_cpu(tmp_path):
+    # Review #7: rank 1 must not unpickle rank 0's cuda:0 tensors onto cuda:0.
+    device = "cuda" if torch.cuda.is_available() else "mps"
+    checkpoint.save_checkpoint(tmp_path / "last", trainable={"w": torch.ones(1)}, ema={"w": torch.ones(1)},
+                               optim_state={"t": torch.ones(2, device=device)}, state=dict(STATE, world_size=1))
+    ck = checkpoint.load_checkpoint(tmp_path / "last", config_hash="c" * 64, manifest_sha="m" * 64,
+                                    base_sha="b" * 64, world_size=1)
+    assert ck["optim_state"]["t"].device.type == "cpu"
+
+
+@pytest.mark.c12
+def test_resume_refuses_a_changed_world_size(tmp_path):
+    # Review #8: a 2-GPU checkpoint resumed on 1 GPU would shard batches differently.
+    checkpoint.save_checkpoint(tmp_path / "last", trainable={"w": torch.ones(1)}, ema={"w": torch.ones(1)},
+                               optim_state=None, state=dict(STATE, world_size=2))
+    with pytest.raises(CheckpointMismatch, match="world_size"):
+        checkpoint.load_checkpoint(tmp_path / "last", config_hash="c" * 64, manifest_sha="m" * 64,
+                                   base_sha="b" * 64, world_size=1)

@@ -102,3 +102,34 @@ def test_hf_store_uploads_folder_before_latest_and_reads_missing_latest_as_none(
     publish_latest(store, latest)
     assert api.calls == [("folder", prefix), ("file", "LATEST")]
     assert json.loads(api.files["LATEST"].decode())["prefix"] == prefix
+
+
+class OnceFlakyStore(LocalStore):
+    def __init__(self, root, failures):
+        super().__init__(root)
+        self.failures = failures
+
+    def _put(self, src, dst):
+        if self.failures:
+            self.failures -= 1
+            raise OSError("503 from the Hub")
+        super()._put(src, dst)
+
+
+def test_uploader_retries_transient_failures(tmp_path):
+    # Review #6: one transient Hub error must not kill a 12 h session.
+    store = OnceFlakyStore(tmp_path / "hub", failures=2)
+    prefix, latest = _ckpt(tmp_path / "last", 1.0, 10)
+    up = Uploader(store, retries=3, backoff=0.0); up.start()
+    up.submit(tmp_path / "last", prefix, latest); up.wait(); up.close()
+    assert read_latest(store) == latest
+
+
+def test_uploader_gives_up_after_its_retries(tmp_path):
+    store = OnceFlakyStore(tmp_path / "hub", failures=10)
+    prefix, latest = _ckpt(tmp_path / "last", 1.0, 10)
+    up = Uploader(store, retries=3, backoff=0.0); up.start()
+    up.submit(tmp_path / "last", prefix, latest)
+    with pytest.raises(OSError, match="503"):
+        up.wait()
+    up.close()

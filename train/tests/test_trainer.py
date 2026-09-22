@@ -88,3 +88,26 @@ def test_time_guard_saves_uploads_and_returns(tiny_cfg, vocab, tmp_path):
     latest = read_latest(LocalStore(tmp_path / "hub"))
     assert latest["update"] == t.state["update"] < t.total_updates
     assert any(e.get("event") == "time_guard" for e in _log(tmp_path))
+
+
+def test_fused_adamw_overflow_is_detected_as_skipped():
+    # Review #4: with fused AdamW, accelerate always reports the step as taken; the scale drop is the truth.
+    from train.trainer import scaler_skipped
+    p = torch.nn.Parameter(torch.ones(4))
+    opt = torch.optim.AdamW([p], fused=True)
+    scaler = torch.amp.GradScaler("cpu", init_scale=1024.0)
+    scaler.scale((p * float("inf")).sum()).backward()
+    before = scaler.get_scale(); scaler.step(opt); scaler.update()
+    assert scaler_skipped(before, scaler.get_scale(), reported=False)
+    assert torch.all(p == 1)
+    opt.zero_grad()
+    scaler.scale(p.sum()).backward()
+    before = scaler.get_scale(); scaler.step(opt); scaler.update()
+    assert not scaler_skipped(before, scaler.get_scale(), reported=False)
+
+
+def test_process_group_timeout_outlasts_a_slow_upload(tiny_cfg, vocab, tmp_path):
+    # Review #6: rank 1 waits in a collective while rank 0 uploads; NCCL's 10 min default would kill it.
+    from datetime import timedelta
+    t, _ = _trainer(tiny_cfg, vocab, tmp_path)
+    assert t.acc.init_handler is not None and t.acc.init_handler.timeout >= timedelta(hours=1)

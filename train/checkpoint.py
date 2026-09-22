@@ -68,7 +68,7 @@ def verify(path) -> dict[str, str]:
     return expected
 
 
-def load_checkpoint(path, *, config_hash, manifest_sha, base_sha) -> dict:
+def load_checkpoint(path, *, config_hash, manifest_sha, base_sha, world_size=1) -> dict:
     path = Path(path)
     verify(path)
     state = json.loads((path / "state.json").read_text())
@@ -76,8 +76,11 @@ def load_checkpoint(path, *, config_hash, manifest_sha, base_sha) -> dict:
         if state.get(field) != now:
             raise CheckpointMismatch(f"refusing to resume: {field} differs "
                                      f"(checkpoint {str(state.get(field))[:12]}, now {now[:12]})")
+    if state.get("world_size", 1) != world_size:            # batches are sharded per rank
+        raise CheckpointMismatch(f"refusing to resume: world_size differs "
+                                 f"(checkpoint {state.get('world_size', 1)}, now {world_size})")
     optim = path / "optim.pt"
     return {"trainable": load_file(str(path / "trainable.safetensors")),
             "ema": load_file(str(path / "ema.safetensors")),
-            "optim_state": torch.load(optim, weights_only=False) if optim.exists() else None,
+            "optim_state": torch.load(optim, map_location="cpu", weights_only=False) if optim.exists() else None,
             "state": state}

@@ -10,6 +10,7 @@ import json
 import queue
 import shutil
 import threading
+import time
 from pathlib import Path
 
 from train import checkpoint
@@ -113,8 +114,9 @@ def download_checkpoint(store, latest, local_dir) -> Path:
 class Uploader:
     """Uploads in a background thread, in submission order; LATEST only after its files are up."""
 
-    def __init__(self, store, keep=2):
+    def __init__(self, store, keep=2, retries=3, backoff=5.0, sleep=time.sleep):
         self.store, self.keep = store, keep
+        self.retries, self.backoff, self._sleep = retries, backoff, sleep
         self._q, self._errors = queue.Queue(), []
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -130,16 +132,26 @@ class Uploader:
             try:
                 if job is None:
                     return
-                local_dir, prefix, latest = job
+                self._with_retries(job)
+            except Exception as e:  # surfaced by wait()
+                self._errors.append(e)
+            finally:
+                self._q.task_done()
+
+    def _with_retries(self, job):
+        local_dir, prefix, latest = job
+        for attempt in range(self.retries):
+            try:
                 self.store.upload_dir(local_dir, prefix)
                 if latest is not None:
                     publish_latest(self.store, latest)
                     for old in self.store.list_prefixes("ckpt")[:-self.keep]:
                         self.store.delete_prefix(old)
-            except Exception as e:  # surfaced by wait()
-                self._errors.append(e)
-            finally:
-                self._q.task_done()
+                return
+            except Exception:
+                if attempt == self.retries - 1:
+                    raise
+                self._sleep(self.backoff * 2 ** attempt)     # transient Hub errors (5xx, rate limit)
 
     def wait(self):
         self._q.join()
