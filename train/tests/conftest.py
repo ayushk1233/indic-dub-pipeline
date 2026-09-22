@@ -12,3 +12,32 @@ def vendor():
     from train.patches import import_vendor
 
     return import_vendor()
+
+
+from pathlib import Path
+
+TINY_PATH = Path(__file__).parent / "configs" / "tiny.yaml"
+
+
+@pytest.fixture(scope="session")
+def vocab(vendor):
+    from train.model import load_vocab
+
+    return load_vocab()
+
+
+@pytest.fixture
+def tiny_cfg():
+    from train.config import load_config
+
+    return load_config(TINY_PATH)
+
+
+@pytest.fixture
+def tiny_model(tiny_cfg, vocab):
+    import torch
+
+    from train.model import build_cfm
+
+    torch.manual_seed(0)
+    return build_cfm(tiny_cfg, vocab)

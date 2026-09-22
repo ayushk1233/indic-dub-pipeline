@@ -1,0 +1,18 @@
+route: A
+model: {dim: 128, depth: 2, heads: 2, ff_mult: 2, text_dim: 64, conv_layers: 1}
+mel: {target_sample_rate: 24000, n_mel_channels: 100, hop_length: 256, win_length: 1024, n_fft: 1024, mel_spec_type: vocos}
+cfm: {audio_drop_prob: 0.3, cond_drop_prob: 0.2, frac_lengths_mask: [0.7, 1.0]}
+lora: {r: 4, alpha: 4, dropout: 0.05, lr: 1.0e-3, targets: [attn.to_q, attn.to_k, attn.to_v, attn.to_out.0, ff.ff.0.0, ff.ff.2]}
+full_modules: []
+optim: {betas: [0.9, 0.999], eps: 1.0e-8, weight_decay_full: 0.01, grad_clip: 1.0, warmup_updates: 5, final_lr_frac: 0.1}
+batch: {frames_per_gpu: 400, max_samples: 4, grad_accum: 2}
+schedule: {epochs: 3}
+ema: {decay: 0.9, start_after: 5}
+precision: "no"
+seed: 1234
+checkpoint: {every_updates: 15, every_minutes: 100000}
+validation:
+  every_updates: 10
+  seed: 4321
+  stop: {target_group: en, plateau_rel: 0.005, plateau_evals: 1000, forgetting_rel: 0.05, forgetting_evals: 2, baselines: {}}   # plateau effectively off for the CPU checks
+runtime: {guard_seconds: 100000, deterministic: true}
