@@ -1,0 +1,21 @@
+# GPU pre-flight copy of route_a.yaml (FINETUNE_PLAN §8b): checkpoints and validation every 100 updates,
+# 4 prefetch workers. Everything else is the route's own config, so G7-G14 measure the real thing.
+route: A
+base: {repo: ai4bharat/IndicF5, revision: ba85abedf18dc479a447eaa0eccbd76ab78a47d5, sha256: ba7f3671180fb7784e24bd1dafc96e729a38ce02e7f6d3877cdef32525a1865c}
+model: {dim: 1024, depth: 22, heads: 16, ff_mult: 2, text_dim: 512, conv_layers: 4}
+mel: {target_sample_rate: 24000, n_mel_channels: 100, hop_length: 256, win_length: 1024, n_fft: 1024, mel_spec_type: vocos}
+cfm: {audio_drop_prob: 0.3, cond_drop_prob: 0.2, frac_lengths_mask: [0.7, 1.0]}
+lora: {r: 32, alpha: 32, dropout: 0.05, lr: 1.0e-4, targets: [attn.to_q, attn.to_k, attn.to_v, attn.to_out.0, ff.ff.0.0, ff.ff.2]}
+full_modules: []
+optim: {betas: [0.9, 0.999], eps: 1.0e-8, weight_decay_full: 0.01, grad_clip: 1.0, warmup_updates: 500, final_lr_frac: 0.1}
+batch: {frames_per_gpu: 12000, max_samples: 32, grad_accum: 2, workers: 4}   # 12000 x 2 GPUs x 2 = 48,000 frames per update
+schedule: {epochs: 10}
+ema: {decay: 0.999, start_after: 200}
+precision: fp16
+seed: 1234
+checkpoint: {every_updates: 100, every_minutes: 30}
+validation:
+  every_updates: 100
+  seed: 4321
+  stop: {target_group: en, plateau_rel: 0.005, plateau_evals: 3, forgetting_rel: 0.05, forgetting_evals: 2, baselines: {}}   # baselines per language from G5
+runtime: {guard_seconds: 39600, deterministic: false}   # 11 h 00 m; excluded from config_hash
