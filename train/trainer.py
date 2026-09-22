@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 from accelerate import Accelerator
-from accelerate.utils import gather_object
+from accelerate.utils import broadcast_object_list, gather_object
 
 from train import checkpoint, lora
 from train.config import config_hash
@@ -23,10 +23,11 @@ from train.ema import TrainableEMA
 from train.patches import import_vendor
 from train.rng import capture_rng, restore_rng
 from train.sampler import ResumableBatchSampler
+from train.stops import check_stop
 from train.store import Uploader, download_checkpoint, read_latest
 from train.validation import FixedNoiseValidator
 
-STATE_KEYS = ("update", "epoch", "batch", "nan_streak", "lr_scale", "recent_losses")
+STATE_KEYS = ("update", "epoch", "batch", "nan_streak", "lr_scale", "recent_losses", "val_history")
 
 
 class DivergenceError(RuntimeError):
@@ -78,7 +79,8 @@ class Trainer:
         if self.updates_per_epoch == 0:
             raise ValueError("training set too small for one update per epoch")
         self.total_updates = self.updates_per_epoch * cfg["schedule"]["epochs"]
-        self.state = {"update": 0, "epoch": 0, "batch": 0, "nan_streak": 0, "lr_scale": 1.0, "recent_losses": []}
+        self.state = {"update": 0, "epoch": 0, "batch": 0, "nan_streak": 0, "lr_scale": 1.0, "recent_losses": [],
+                      "val_history": []}
         self.ema = TrainableEMA(model, cfg["ema"]["decay"], cfg["ema"]["start_after"])
         self.validator = FixedNoiseValidator(val_items, model.vocab_char_map, cfg["validation"]["seed"])
         o = cfg["optim"]
@@ -120,8 +122,9 @@ class Trainer:
                 epoch, batches = self.state["epoch"], self._epoch_batches()
                 while self.state["epoch"] == epoch and self.state["batch"] < len(batches):
                     self._update(batches[self.state["batch"]: self.state["batch"] + self.accum])
-                    if self._after_update():
-                        return "time_guard"
+                    reason = self._after_update()
+                    if reason:
+                        return reason
                 if self.state["epoch"] == epoch:
                     self._end_epoch()
             if self._last_saved != self.state["update"]:
@@ -174,10 +177,16 @@ class Trainer:
         self._log({"update": self.state["update"], "epoch": self.state["epoch"], "loss": loss_value,
                    "lr": self.scheduler.get_last_lr()[0], "grad_norm": grad_norm, "outcome": outcome})
 
-    def _after_update(self) -> bool:
+    def _after_update(self):
         u, ck = self.state["update"], self.cfg["checkpoint"]
         if u and u % self.cfg["validation"]["every_updates"] == 0 and u != self._last_val:
-            self._validate()
+            stop = self._validate()
+            if stop:
+                if u != self._last_saved:
+                    self._save_last()
+                self.uploader.wait()
+                self._log({"event": "validation_stop", "update": u, "reason": stop})
+                return "validation_stop"
         due = u % ck["every_updates"] == 0 or (self.clock() - self._last_save_time) / 60 >= ck["every_minutes"]
         if u and due and u != self._last_saved:
             self._save_last()
@@ -186,18 +195,23 @@ class Trainer:
                 self._save_last()
             self.uploader.wait()
             self._log({"event": "time_guard", "update": u})
-            return True
-        return False
+            return "time_guard"
+        return None
 
     def _validate(self):
         self._last_val = self.state["update"]
-        if not self.acc.is_main_process:
-            return
-        raw = self._raw()
-        result = {"raw": self.validator.evaluate(raw)}
-        with self.ema.swapped(raw):
-            result["ema"] = self.validator.evaluate(raw)
-        self._log({"event": "validation", "update": self.state["update"], **result})
+        stop = None
+        if self.acc.is_main_process:
+            raw = self._raw()
+            result = {"raw": self.validator.evaluate(raw)}
+            with self.ema.swapped(raw):
+                result["ema"] = self.validator.evaluate(raw)
+            self._log({"event": "validation", "update": self.state["update"], **result})
+            self.state["val_history"] = self.state["val_history"] + [result["ema"]]
+            stop = check_stop(self.state["val_history"], self.cfg["validation"]["stop"])
+        if self.acc.num_processes > 1:
+            stop = broadcast_object_list([stop])[0]
+        return stop
 
     # ---- checkpoints
     def _state_for_save(self):
