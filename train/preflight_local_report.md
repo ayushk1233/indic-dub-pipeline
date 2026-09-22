@@ -18,7 +18,7 @@ us go for a walk" in Devanagari, fix_duration = reference + 3 s.
 
 | split | clips | speakers | hours |
 |---|---|---|---|
-| train | 2,486 | 191 | 3.0 |
+| train | 2,480 | 190 | 3.0 |
 | val_en | 150 | 8 (held out) | 0.18 |
 
 Gates (both transcript forms): 2,630 kept, 6 rejected on characters per second, 0 on vocabulary, 0 on script.
