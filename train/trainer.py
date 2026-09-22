@@ -310,6 +310,8 @@ class Trainer:
     def _end_epoch(self):
         k = self.state["epoch"]
         self.state["epoch"], self.state["batch"] = k + 1, 0
+        if not self.cfg["checkpoint"].get("epoch_saves", True):
+            return                  # same config on every rank, so no rank waits in a collective the others skip
         state = self._state_for_save()
         if self.acc.is_main_process:
             self.uploader.wait()
