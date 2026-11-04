@@ -93,15 +93,16 @@ def g9_verdict(single, double, min_ratio=1.7, warm=10):
 
 
 def g10_verdict(log, max_drops=0.05):
-    """1,000 updates: no NaN/inf; GradScaler scale >= 1 and not collapsing; gradient norm logged."""
+    """1,000 updates: no NaN/inf; GradScaler scale >= 1 and not collapsing (if mixed precision); gradient norm logged."""
     nonfinite = [e for e in log if e.get("event") == "nonfinite"]
     ups = _ok(log)
     scales = [e["scale"] for e in ups if e.get("scale") is not None]
     drops = sum(1 for x, y in zip(scales, scales[1:]) if y < x)
-    ok = (not nonfinite and bool(scales) and min(scales) >= 1 and drops <= max_drops * len(ups)
-          and all("grad_norm" in e for e in ups))
-    return _r(ok, f"{len(nonfinite)} non-finite; min scale {min(scales) if scales else None}; "
-              f"{drops} scale drops in {len(ups)} updates")
+    scaler_ok = (min(scales) >= 1 and drops <= max_drops * len(ups)) if scales else True
+    ok = not nonfinite and scaler_ok and all("grad_norm" in e for e in ups)
+    detail = (f"{len(nonfinite)} non-finite; min scale {min(scales)}; {drops} scale drops in {len(ups)} updates"
+              if scales else f"{len(nonfinite)} non-finite in {len(ups)} updates (fp32)")
+    return _r(ok, detail)
 
 
 def g11_verdict(log):

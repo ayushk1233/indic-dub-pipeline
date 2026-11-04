@@ -52,6 +52,7 @@ def test_g9_scaling_and_loss_match():
 
 def test_g10():
     assert g.g10_verdict(_log(1000))["status"] == "pass"
+    assert g.g10_verdict(_log(1000, scale=None))["status"] == "pass"
     bad = _log(1000) + [{"event": "nonfinite", "update": 5, "loss": float("nan")}]
     assert g.g10_verdict(bad)["status"] == "fail"
     assert g.g10_verdict(_log(1000, scale=0.5))["status"] == "fail"

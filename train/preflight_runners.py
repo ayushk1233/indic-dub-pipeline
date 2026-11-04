@@ -66,9 +66,10 @@ def _train(base, data_dir, val_dir, work, store, *, route="a", gpus=2, sets=(), 
     nccl = Path(out) / "nccl_env.json" if out else None
     if nccl is not None and nccl.exists():
         env.update(json.loads(nccl.read_text()))
+    prec = apply_overrides(_cfg(route), sets).get("precision", "no")
     if gpus == 2:
         launcher = str(Path(sys.executable).with_name("accelerate"))
-        cmd = [launcher, "launch", "--multi_gpu", "--num_processes", "2", "--mixed_precision", "fp16", *argv]
+        cmd = [launcher, "launch", "--multi_gpu", "--num_processes", "2", "--mixed_precision", prec, *argv]
     else:
         env["CUDA_VISIBLE_DEVICES"] = "0"
         cmd = [sys.executable, *argv]
