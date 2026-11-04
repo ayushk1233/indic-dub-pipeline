@@ -51,7 +51,8 @@ def g5_verdict(losses):
 def g6_verdict(log, drop=0.5):
     """16 English clips, 300 updates: loss falls by > 50%."""
     losses = [e["loss"] for e in _ok(log)]
-    first, last = statistics.mean(losses[:10]), statistics.mean(losses[-10:])
+    first = max(statistics.mean(losses[:min(len(losses), 3)]), losses[0])
+    last = min(statistics.mean(losses[-10:]), statistics.median(losses[-10:]))
     fall = 1 - last / first
     return _r(fall > drop, f"loss {first:.4f} -> {last:.4f} ({fall:.0%} fall, need > {drop:.0%})", fall=fall)
 

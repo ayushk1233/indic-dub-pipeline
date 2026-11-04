@@ -224,7 +224,7 @@ def g5(base, data, out=None, **_):
 # 16 clips are ~7,350 frames: the route's batch (12,000 or 8,000 frames x accum) made 0 updates per epoch
 # (review C1). ~2,000 frames and no accumulation give ~4 updates per epoch; with ~75 epochs in 300 updates,
 # epoch checkpoints are switched off so the store does not grow by ~75 of them.
-G6_SETS = ["lora.lr=5.0e-4", "optim.warmup_updates=20", "optim.final_lr_frac=1.0", "schedule.max_updates=300",
+G6_SETS = ["lora.lr=5.0e-4", "optim.warmup_updates=20", "optim.final_lr_frac=0.1", "schedule.max_updates=300",
            "schedule.epochs=100000", "validation.every_updates=100000", "ema.start_after=100000",
            "batch.workers=0", "batch.frames_per_gpu=2000", "batch.grad_accum=1", "checkpoint.epoch_saves=false"]
 

@@ -107,6 +107,8 @@ class Trainer:
         if self.updates_per_epoch == 0:
             raise ValueError("training set too small for one update per epoch")
         self.total_updates = self.updates_per_epoch * cfg["schedule"]["epochs"]
+        if cfg["schedule"].get("max_updates"):
+            self.total_updates = min(self.total_updates, cfg["schedule"]["max_updates"])
         self.state = {"update": 0, "epoch": 0, "batch": 0, "nan_streak": 0, "lr_scale": 1.0, "recent_losses": [],
                       "val_history": []}
         self.validator = FixedNoiseValidator(val_items, model.vocab_char_map, cfg["validation"]["seed"])
