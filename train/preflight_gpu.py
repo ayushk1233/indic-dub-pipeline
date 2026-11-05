@@ -48,11 +48,18 @@ def g5_verdict(losses):
     return _r(all(losses["hi"] < v for v in en), shown, **losses)
 
 
-def g6_verdict(log, drop=0.5):
-    """16 English clips, 300 updates: loss falls by > 50%."""
-    losses = [e["loss"] for e in _ok(log)]
-    first = max(statistics.mean(losses[:min(len(losses), 3)]), losses[0])
-    last = min(statistics.mean(losses[-10:]), statistics.median(losses[-10:]))
+def g6_verdict(log, drop=0.5, warm=3, tail=10):
+    """16 English clips, 300 updates: loss falls by > 50% from the first epoch to the tail.
+
+    The baseline must be epoch 1. With ~4 updates per epoch (16 clips, 7,350 frames, 2,000 frames/GPU),
+    `losses[:10]` is 2.5 epochs of an already-adapted model and understates the fall by half (PROGRESS 130).
+    Both ends are means, not picked extremes: a max baseline and a min tail would inflate the drop.
+    """
+    losses = [e["loss"] for e in _ok(log) if math.isfinite(e.get("loss", float("nan")))]
+    if not losses:
+        return _r(False, "no finite loss in the log", fall=0.0)
+    first = statistics.mean(losses[:min(len(losses), warm)])
+    last = statistics.mean(losses[-min(len(losses), tail):])
     fall = 1 - last / first
     return _r(fall > drop, f"loss {first:.4f} -> {last:.4f} ({fall:.0%} fall, need > {drop:.0%})", fall=fall)
 

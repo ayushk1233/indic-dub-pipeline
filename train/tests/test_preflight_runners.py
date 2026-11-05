@@ -26,6 +26,14 @@ def test_every_check_has_a_runner():
     assert all(callable(getattr(pr, f"g{i}")) for i in range(1, 15))
 
 
+def test_g7_refuses_a_precision_it_cannot_measure():
+    """bf16 would silently run an fp32 autocast-free step and report an fp32 peak (T4 has no bf16 anyway)."""
+    import pytest
+
+    with pytest.raises(ValueError, match="bf16"):
+        pr.g7(base=None, route="a", cfg={"precision": "bf16"})
+
+
 def test_cli_writes_json(tmp_path, monkeypatch):
     monkeypatch.setattr(pr, "g1", lambda **kw: {"status": "pass", "detail": "stub"})
     pr.main(["g1", "--out", str(tmp_path)])

@@ -1,3 +1,5 @@
+import statistics
+
 import numpy as np
 
 from train import preflight_gpu as g
@@ -30,6 +32,25 @@ def test_g5_partial_without_indic():
 def test_g6_needs_half_drop():
     assert g.g6_verdict(_log(300, loss=lambda u: 1.0 if u <= 10 else 0.4))["status"] == "pass"
     assert g.g6_verdict(_log(300, loss=lambda u: 1.0 if u <= 10 else 0.6))["status"] == "fail"
+
+
+def test_g6_baseline_is_the_first_epoch():
+    """The recorded trace (PROGRESS 130): 16 clips = 4 updates/epoch, so losses[:10] is 2.5 epochs of an
+    already-adapted model. Update 1 was 1.2092 and the tail ~0.39; a mean(losses[:10]) baseline reads ~40%
+    and fails, the first-epoch baseline reads ~59% and passes."""
+    early = [1.2092, 0.9104, 0.7391, 0.6512, 0.5903, 0.5417, 0.5011, 0.4703, 0.4488, 0.4310]
+    tail = [0.3912, 0.3868, 0.3941, 0.3904, 0.3837, 0.3888, 0.3925, 0.3901, 0.3866, 0.3917]
+    trace = early + [0.4201, 0.4055] * 140 + tail                       # 300 updates
+    assert len(trace) == 300
+    r = g.g6_verdict(_log(300, loss=lambda u: trace[u - 1]))
+    assert r["status"] == "pass" and r["fall"] > 0.5, r
+    window = 1 - statistics.median(trace[-10:]) / statistics.mean(trace[:10])
+    assert window < 0.5, window        # what the mid-run baseline reported for the same run
+
+
+def test_g6_empty_log_fails_without_raising():
+    assert g.g6_verdict([])["status"] == "fail"
+    assert g.g6_verdict([{"event": "nonfinite", "update": 0, "loss": float("nan")}])["status"] == "fail"
 
 
 def test_g7_binary_search():

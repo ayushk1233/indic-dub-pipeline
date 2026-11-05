@@ -224,6 +224,8 @@ def g5(base, data, out=None, **_):
 # 16 clips are ~7,350 frames: the route's batch (12,000 or 8,000 frames x accum) made 0 updates per epoch
 # (review C1). ~2,000 frames and no accumulation give ~4 updates per epoch; with ~75 epochs in 300 updates,
 # epoch checkpoints are switched off so the store does not grow by ~75 of them.
+# Not subject to _frames_sets(): 2,000 frames/GPU is what makes these 16 clips 4 updates per epoch, and
+# g6_verdict's first-epoch baseline is calibrated to that. G6 measures adaptation, not memory — leave it alone.
 G6_SETS = ["lora.lr=5.0e-4", "optim.warmup_updates=20", "optim.final_lr_frac=0.1", "schedule.max_updates=300",
            "schedule.epochs=100000", "validation.every_updates=100000", "ema.start_after=100000",
            "batch.workers=0", "batch.frames_per_gpu=2000", "batch.grad_accum=1", "checkpoint.epoch_saves=false"]
@@ -270,14 +272,18 @@ def g7_batch_shape(frames, max_samples):
     return n, min(FRAMES_20S, math.ceil(frames / n))
 
 
-def g7(base, route="a", **_):
+def g7(base, route="a", cfg=None, **_):
     from train import lora
 
-    cfg = _cfg(route)
+    cfg = cfg or _cfg(route)
+    prec = cfg["precision"]
+    if prec not in ("no", "fp16"):
+        raise ValueError(f"G7 measures precision 'no' or 'fp16', got {prec!r}: a bf16 config would silently "
+                         "measure an fp32 step and an fp32 peak")
     model = lora.attach(_model(base, cfg, "cuda"), cfg)
     params = [p for p in model.parameters() if p.requires_grad]
     letters = [c for c in load_vocab() if ("a" <= c <= "z") or ("क" <= c <= "ह")]
-    scaler = torch.amp.GradScaler("cuda")
+    scaler = torch.amp.GradScaler("cuda") if prec == "fp16" else None   # Trainer's acc.scaler is None at "no"
 
     def measure(frames):
         n, length = g7_batch_shape(frames, cfg["batch"]["max_samples"])
@@ -287,14 +293,24 @@ def g7(base, route="a", **_):
         mel = torch.randn(n, length, 100, device="cuda")
         text = ["".join(letters[i % len(letters)] for i in range(k, k + min(300, length))) for k in range(n)]
         try:
-            for _ in range(2):          # two steps: a scaler-skipped first step never allocates Adam state
-                with torch.autocast("cuda", dtype=torch.float16):
+            for _ in range(2):          # step 1 allocates Adam state, step 2 measures the steady-state peak
+                with torch.autocast("cuda", dtype=torch.float16, enabled=prec == "fp16"):
                     loss, _, _ = model(mel, text=text, lens=torch.full((n,), length, device="cuda"))
-                scaler.scale(loss).backward()
-                scaler.step(opt)
-                scaler.update()
-                opt.zero_grad(set_to_none=False)
-            peak = torch.cuda.max_memory_allocated()
+                if scaler is None:
+                    loss.backward()
+                    opt.step()
+                else:
+                    scaler.scale(loss).backward()
+                    scaler.step(opt)
+                    scaler.update()
+                opt.zero_grad(set_to_none=False)     # keep grad buffers inside the peak, as the trainer does
+            # A step that was skipped (fp16 overflow skips opt.step) allocates no Adam state and reports a
+            # peak that no real step ever reached. Refuse to measure rather than return a too-large number.
+            if not math.isfinite(float(loss)):
+                raise RuntimeError(f"non-finite loss at {frames} frames: this is not a real step")
+            if not opt.state:
+                raise RuntimeError(f"optimizer state never allocated at {frames} frames: the step was skipped")
+            peak = torch.cuda.max_memory_allocated()   # host-side at allocation time: exact without a sync
         except torch.cuda.OutOfMemoryError:
             peak = float("inf")
         opt.zero_grad(set_to_none=True)
