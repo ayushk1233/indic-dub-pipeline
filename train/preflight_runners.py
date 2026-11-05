@@ -224,8 +224,9 @@ def g5(base, data, out=None, **_):
 # 16 clips are ~7,350 frames: the route's batch (12,000 or 8,000 frames x accum) made 0 updates per epoch
 # (review C1). ~2,000 frames and no accumulation give ~4 updates per epoch; with ~75 epochs in 300 updates,
 # epoch checkpoints are switched off so the store does not grow by ~75 of them.
-# Not subject to _frames_sets(): 2,000 frames/GPU is what makes these 16 clips 4 updates per epoch, and
-# g6_verdict's first-epoch baseline is calibrated to that. G6 measures adaptation, not memory — leave it alone.
+# Not subject to _frames_sets(): 2,000 frames/GPU is what makes these 16 clips 4 updates per epoch, and the
+# 300-update budget the fixed-noise reading is taken over is calibrated to that. G6 measures adaptation, not
+# memory — leave it alone.
 G6_SETS = ["lora.lr=5.0e-4", "optim.warmup_updates=20", "optim.final_lr_frac=0.1", "schedule.max_updates=300",
            "schedule.epochs=100000", "validation.every_updates=100000", "ema.start_after=100000",
            "batch.workers=0", "batch.frames_per_gpu=2000", "batch.grad_accum=1", "checkpoint.epoch_saves=false"]
@@ -238,6 +239,7 @@ def g6(base, data, out, route="a", **_):
     from train.data import ManifestDataset
     from train.generate import generate
     from train.store import LocalStore, download_checkpoint, read_latest
+    from train.validation import FixedNoiseValidator
     from train.vocoder import load_vocoder
     from safetensors.torch import load_file
 
@@ -247,17 +249,22 @@ def g6(base, data, out, route="a", **_):
                out=out, timeout=3600)
     if r.returncode != 0:
         return v._r(False, f"train.run exited {r.returncode}: {r.stderr[-300:]}")
-    res = v.g6_verdict(_log(work))
     cfg = apply_overrides(_cfg(route), G6_SETS)
-    model = lora.attach(_model(base, cfg), cfg)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = lora.attach(_model(base, cfg), cfg).to(device)
+    # Paired fixed-noise loss on the 16 clips, before and after the checkpoint: zero-init LoRA makes the first
+    # reading the base model, and the same draw both times removes the batch noise that broke the loss-based rule.
+    ds = ManifestDataset(d / "overfit16", root=data)
+    validator = FixedNoiseValidator(ds.val_items(), model.vocab_char_map, cfg["validation"]["seed"])
+    before = validator.evaluate(model)["all"]
     ck = download_checkpoint(LocalStore(hub), read_latest(LocalStore(hub)), Path(out) / f"g6_{route}_final")
     lora.load_trainable(model, load_file(str(ck / "trainable.safetensors")))
-    model = model.to("cuda" if torch.cuda.is_available() else "cpu")
-    ds = ManifestDataset(d / "overfit16", root=data)
+    after = validator.evaluate(model)["all"]
+    res = v.g6_verdict(before, after, log=_log(work))
     audio, _ = sf.read(ds._inner.data[0]["audio_path"], dtype="float32", always_2d=True)
     gen_text = ds._inner.data[1]["text"]
     wav = generate(model, torch.from_numpy(audio.T).mean(0, keepdim=True), ds._inner.data[0]["text"], gen_text,
-                   seed=1234, vocoder=load_vocoder(base).to(next(model.parameters()).device))["wave"]
+                   seed=1234, vocoder=load_vocoder(base).to(device))["wave"]
     sf.write(Path(out) / f"g6_{route}_overfit.wav", wav, 24000)
     Path(out, f"g6_{route}_overfit.txt").write_text(gen_text)
     res["detail"] += f"; g6_{route}_overfit.wav saved for scoring in the eval env"

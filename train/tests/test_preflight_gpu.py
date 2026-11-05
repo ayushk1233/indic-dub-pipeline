@@ -1,6 +1,5 @@
-import statistics
-
 import numpy as np
+import pytest
 
 from train import preflight_gpu as g
 
@@ -29,28 +28,25 @@ def test_g5_partial_without_indic():
     assert g.g5_verdict({"en_a": 0.5, "en_b": 1.4, "hi": 0.9})["status"] == "fail"   # val_hi must be below every val_en
 
 
-def test_g6_needs_half_drop():
-    assert g.g6_verdict(_log(300, loss=lambda u: 1.0 if u <= 10 else 0.4))["status"] == "pass"
-    assert g.g6_verdict(_log(300, loss=lambda u: 1.0 if u <= 10 else 0.6))["status"] == "fail"
+def test_g6_decides_on_the_paired_fixed_noise_fall():
+    assert g.g6_verdict(0.60, 0.50)["status"] == "pass"          # 17%
+    assert g.g6_verdict(0.60, 0.57)["status"] == "fail"          # 5%
+    r = g.g6_verdict(0.90, 0.45)
+    assert r["status"] == "pass" and r["fall"] == pytest.approx(0.5)
 
 
-def test_g6_baseline_is_the_first_epoch():
-    """The recorded trace (PROGRESS 130): 16 clips = 4 updates/epoch, so losses[:10] is 2.5 epochs of an
-    already-adapted model. Update 1 was 1.2092 and the tail ~0.39; a mean(losses[:10]) baseline reads ~40%
-    and fails, the first-epoch baseline reads ~59% and passes."""
-    early = [1.2092, 0.9104, 0.7391, 0.6512, 0.5903, 0.5417, 0.5011, 0.4703, 0.4488, 0.4310]
-    tail = [0.3912, 0.3868, 0.3941, 0.3904, 0.3837, 0.3888, 0.3925, 0.3901, 0.3866, 0.3917]
-    trace = early + [0.4201, 0.4055] * 140 + tail                       # 300 updates
-    assert len(trace) == 300
-    r = g.g6_verdict(_log(300, loss=lambda u: trace[u - 1]))
-    assert r["status"] == "pass" and r["fall"] > 0.5, r
-    window = 1 - statistics.median(trace[-10:]) / statistics.mean(trace[:10])
-    assert window < 0.5, window        # what the mid-run baseline reported for the same run
-
-
-def test_g6_empty_log_fails_without_raising():
-    assert g.g6_verdict([])["status"] == "fail"
-    assert g.g6_verdict([{"event": "nonfinite", "update": 0, "loss": float("nan")}])["status"] == "fail"
+def test_g6_training_loss_is_context_only():
+    """The recorded trace (PROGRESS 133): 300 updates, 4 per epoch, ±0.2 batch noise. u1 was 1.2092, u2 0.5092,
+    u3 0.7159 and the tail 0.4178/0.5790/0.3960/0.5336 — mean(first 3) -> mean(last 10) is 0.8114 -> 0.6039
+    (26%), nowhere near the old 50% bar on a run that plainly learned. It is reported, never gated."""
+    trace = [1.2092, 0.5092, 0.7159, 0.7551, 0.5627, 0.6390, 0.60, 0.68, 0.62, 0.4178, 0.5790, 0.3960, 0.5336]
+    log = [{"update": i + 1, "outcome": "ok", "loss": x} for i, x in enumerate(trace)]
+    first, last = g.g6_train_fall(log, warm=3, tail=4)
+    assert first == pytest.approx((1.2092 + 0.5092 + 0.7159) / 3)
+    assert last == pytest.approx((0.4178 + 0.5790 + 0.3960 + 0.5336) / 4)
+    assert g.g6_train_fall([]) is None and g.g6_train_fall([{"outcome": "nonfinite", "loss": float("nan")}]) is None
+    r = g.g6_verdict(0.60, 0.55, log=log)                        # 8% paired fall fails even with a 26% "drop"
+    assert r["status"] == "fail" and "not gated" in r["detail"]
 
 
 def test_g7_binary_search():
