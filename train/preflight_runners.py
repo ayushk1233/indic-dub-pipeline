@@ -360,11 +360,14 @@ def g9(base, data, out, **_):
 
 
 def g10(base, data, out, **_):
+    # 1,000 updates x 28,000 frames at G8's measured 5.51 s/update is 5,506 s, plus startup, two validations,
+    # ten checkpoint saves and EMA from update 200. 9,000 s is that plus a 50% guard — 7,200 s left ~17 min
+    # for ~25 min of overhead and would have killed a healthy run (PROGRESS 135).
     train, val = _ra(data)
     work = Path(out) / "g10_work"
     r = _train(base, train, val, work, f"local:{Path(out) / 'g10_hub'}",
                sets=["schedule.max_updates=1000", "schedule.epochs=100000", "validation.every_updates=500",
-                     *_frames_sets(out)], out=out, timeout=7200)
+                     *_frames_sets(out)], out=out, timeout=9000)
     if r.returncode != 0:
         return v._r(False, f"train.run exited {r.returncode}: {r.stderr[-300:]}")
     return v.g10_verdict(_log(work))
