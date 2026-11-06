@@ -87,13 +87,17 @@ def _text(b):
 
 
 def _frames_sets(out):
-    """Use G7's measured frames_per_gpu when it is below the config's (the plan's number is an estimate)."""
+    """Use G7's measured Route A limit, including in a fresh G14 batch container."""
     g7 = Path(out) / "g7_a.json"                 # G8-G14 run Route A
+    # G14 runs alone in a committed container, so it has no local G7 result.
+    # The earlier 2xT4 G7 measured 7,000 frames/GPU (FINDINGS.md §21h).
+    frames = 7000
     if g7.exists():
-        f = json.loads(g7.read_text()).get("frames_per_gpu")
-        if f and f < _cfg("a")["batch"]["frames_per_gpu"]:
-            return [f"batch.frames_per_gpu={f}"]
-    return []
+        measured = json.loads(g7.read_text()).get("frames_per_gpu")
+        if measured:
+            frames = measured
+    configured = _cfg("a")["batch"]["frames_per_gpu"]
+    return [f"batch.frames_per_gpu={frames}"] if frames < configured else []
 
 
 # ---- G1
